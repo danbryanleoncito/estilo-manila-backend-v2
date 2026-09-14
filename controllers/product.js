@@ -56,13 +56,9 @@ module.exports.addProduct = (req, res) => {
 module.exports.getAllProduct = (req, res) => {
   return Product.find({})
     .then((result) => {
-      // if the result is not null send status 30 and its result
-      if (result.length > 0) {
-        return res.status(200).send(result);
-      } else {
-        // 404 for not found product
-        return res.status(404).send({ message: "No Products Found" });
-      }
+      //always return an array, even when empty, so the frontend
+      //can rely on a consistent shape regardless of catalog state.
+      return res.status(200).send(result);
     })
     .catch((error) => errorHandler(error, req, res));
 };
