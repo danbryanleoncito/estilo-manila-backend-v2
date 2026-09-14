@@ -44,7 +44,7 @@ module.exports.register = (req, res) => {
           message: "User registered successfully",
         })
       )
-      .catch((error) => error);
+      .catch((error) => errorHandler(error, req, res));
   }
 };
 
