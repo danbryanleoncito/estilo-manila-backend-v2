@@ -19,7 +19,7 @@ const userSchema = new mongoose.Schema({
   },
   image: {
     type: String,
-    required: [true, "Image is required"],
+    default: "https://placehold.co/200x200?text=User",
   },
   isAdmin: {
     type: Boolean,
