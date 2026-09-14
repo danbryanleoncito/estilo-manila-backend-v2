@@ -1,0 +1,5 @@
+node_modules
+.env
+*.key
+*.cert
+.DS_Store
