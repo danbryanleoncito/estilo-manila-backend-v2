@@ -70,15 +70,11 @@ module.exports.getAllProduct = (req, res) => {
 module.exports.getAllActive = (req, res) => {
   Product.find({ isActive: true })
     .then((result) => {
-      if (result.length > 0) {
-        //if the product is active, return the product.
-        return res.status(200).send(result);
-      } else {
-        //if there is no active product, return 'No active product found'.
-        return res.status(200).send({ message: "No active product found" });
-      }
+      //always return an array, even when empty, so the frontend
+      //can rely on a consistent shape regardless of catalog state.
+      return res.status(200).send(result);
     })
-    .catch((err) => res.status(500).send(err));
+    .catch((err) => errorHandler(err, req, res));
 };
 
 module.exports.getProduct = (req, res) => {
