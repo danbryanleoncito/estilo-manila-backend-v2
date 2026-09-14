@@ -10,10 +10,10 @@
 ## User Credentials:
 
 - Admin User
-  - Email: <admin@gmail.com>
+  - Email: admin@gmail.com
   - Password: Admin123!
 - Dummy Customer:
-  - Email: <customer@gmail.com>
+  - Email: customer@gmail.com
   - Password: Customer123!
 
 ## Features:
@@ -33,7 +33,7 @@
   - Clear cart
 - Order Resources:
   - Create order
-  - Retrieve logged in user’s orders
+  - Retrieve logged in user's orders
 
 ## Features by Dan Leoncito
 
@@ -50,4 +50,4 @@
   - Add search for products by name
   - Add search for products by price range
 - Order Resources:
-  - Retrieve all user’s orders
+  - Retrieve all user's orders
