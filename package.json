@@ -1,6 +1,6 @@
 {
   "name": "csp2-b443-conde-leoncito",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
