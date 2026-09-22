@@ -1,40 +1,74 @@
 const Order = require("../models/order");
 const Cart = require("../models/cart");
-const Product = require("../models/product");
-const { errorHandler } = require("../auth");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const { recomputeCartTotal } = require("../utils/cartTotal");
 
 module.exports.checkout = async (req, res) => {
   try {
     const userId = req.user.id;
+    const { paymentIntentId } = req.body;
+
+    // Check idempotency before touching the cart: if the webhook already turned this
+    // payment into an Order (and deleted the cart), the cart-empty check below would
+    // otherwise mask that and report a false failure.
+    if (paymentIntentId) {
+      const existingOrder = await Order.findOne({ paymentIntentId });
+      if (existingOrder) {
+        return res.status(200).send({ message: "Order already placed", order: existingOrder });
+      }
+    }
 
     const cart = await Cart.findOne({ userId });
     if (!cart || cart.cartItems.length === 0) {
       return res.status(400).send({ message: "Your cart is empty" });
     }
 
-    // Recalculate subtotal and total price before placing the order
-    let totalPrice = 0;
-    for (let i = 0; i < cart.cartItems.length; i++) {
-      const item = cart.cartItems[i];
-      const product = await Product.findById(item.productId);
-      item.subtotal = product.price * item.quantity;
-      totalPrice += item.subtotal;
+    const totalPrice = await recomputeCartTotal(cart.cartItems);
+
+    let paymentStatus = "COD";
+    let paymentMethod = "cod";
+    let verifiedIntentId = null;
+
+    if (paymentIntentId) {
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+      if (!intent || intent.status !== "succeeded") {
+        return res.status(400).send({ message: "Payment has not succeeded yet" });
+      }
+      if (!intent.metadata || intent.metadata.userId !== String(userId)) {
+        return res.status(403).send({ message: "This payment does not belong to the current user" });
+      }
+
+      paymentStatus = "Paid";
+      paymentMethod = "card";
+      verifiedIntentId = paymentIntentId;
     }
 
     const order = new Order({
       userId,
       productsOrdered: cart.cartItems,
-      totalPrice: totalPrice,
+      totalPrice,
+      paymentStatus,
+      paymentMethod,
+      paymentIntentId: verifiedIntentId,
     });
 
-    await order.save();
+    try {
+      await order.save();
+    } catch (saveErr) {
+      if (saveErr.code === 11000 && verifiedIntentId) {
+        const raceOrder = await Order.findOne({ paymentIntentId: verifiedIntentId });
+        return res.status(200).send({ message: "Order already placed", order: raceOrder });
+      }
+      throw saveErr;
+    }
 
     // Clear the cart after placing the order
     await Cart.findOneAndDelete({ userId });
 
-    res.status(200).send({ message: "Ordered successfully" });
+    res.status(200).send({ message: "Ordered successfully", order });
   } catch (error) {
-    res.status(500).send({ message: errorHandler(error, req, res) });
+    res.status(500).send({ message: "Checkout failed", error: error.message });
   }
 };
 
@@ -50,7 +84,7 @@ module.exports.getLoggedUserOrders = async (req, res) => {
 
     res.status(200).send({ orders: orders });
   } catch (error) {
-    res.status(500).send({ message: errorHandler(error, req, res) });
+    res.status(500).send({ message: "Error retrieving orders", error: error.message });
   }
 };
 

@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -10,7 +11,19 @@ const cartRoutes = require("./routes/cart");
 
 const orderRoutes = require("./routes/order");
 
+const paymentRoutes = require("./routes/payment");
+const paymentController = require("./controllers/payment");
+
 const app = express();
+
+// Stripe webhook needs the raw request body for signature verification, so it must be
+// registered before the global express.json() parser below.
+app.post(
+  "/b4/payment/webhook",
+  express.raw({ type: "application/json" }),
+  paymentController.handleWebhook
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -41,6 +54,9 @@ app.use("/b4/cart", cartRoutes);
 
 //[SECTION] Order routes
 app.use("/b4/order", orderRoutes);
+
+//[SECTION] Payment routes
+app.use("/b4/payment", paymentRoutes);
 
 // https.createServer(sslOptions, app).listen(443, () => {
 //   console.log("HTTPS Server running on port 443");
