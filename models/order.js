@@ -11,14 +11,10 @@ const orderSchema = new mongoose.Schema({
         type: String,
         required: [true, "product ID is Required"],
       },
-    },
-    {
       quantity: {
         type: Number,
         required: [true, "Quantity is Required"],
       },
-    },
-    {
       subtotal: {
         type: Number,
         required: [true, "subtotal is Required"],
@@ -36,6 +32,21 @@ const orderSchema = new mongoose.Schema({
   status: {
     type: String,
     default: "Pending",
+  },
+  paymentStatus: {
+    type: String,
+    enum: ["COD", "Unpaid", "Paid", "Failed"],
+    default: "Unpaid",
+  },
+  paymentIntentId: {
+    type: String,
+    default: null,
+    index: { unique: true, sparse: true },
+  },
+  paymentMethod: {
+    type: String,
+    enum: ["card", "cod"],
+    default: "cod",
   },
 });
 
