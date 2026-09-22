@@ -2,6 +2,16 @@
 
 All notable changes to this backend are documented in this file.
 
+## [1.1.1] - 2026-09-22
+
+### Fixed
+- `createPaymentIntent` created PaymentIntents with `automatic_payment_methods: { enabled: true }`,
+  which allows redirect-based methods (Link, etc.) alongside card and made Stripe require a
+  `return_url` on every confirmation attempt — the checkout UI only ever offers card vs. Cash on
+  Delivery, never a redirect-based method. Restricted to `payment_method_types: ["card"]`, removing
+  the return_url requirement entirely so the frontend can confirm card payments inline (3D Secure,
+  when required, shows as an on-page popup instead of a redirect).
+
 ## [1.1.0] - 2026-09-22
 
 ### Added

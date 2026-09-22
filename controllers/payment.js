@@ -24,7 +24,7 @@ module.exports.createPaymentIntent = async (req, res) => {
       amount: Math.round(totalPrice * 100),
       currency: "php",
       metadata: { userId: String(userId) },
-      automatic_payment_methods: { enabled: true },
+      payment_method_types: ["card"],
     });
 
     res.status(201).send({
