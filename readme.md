@@ -86,9 +86,11 @@ All routes are prefixed with `/b4`.
 Full history is in [CHANGELOG.md](CHANGELOG.md). Summary:
 
 ### v1.1.1 (2026-09-22)
+_Integrated by Dan Leoncito._
 - **Fixed:** PaymentIntents are now card-only, so Stripe no longer demands a `return_url`; 3D Secure shows as an on-page popup instead of a redirect.
 
 ### v1.1.0 (2026-09-22)
+_Integrated by Dan Leoncito._
 - **Added:** Stripe test-mode payments (create-payment-intent endpoint, signature-verified webhook, idempotent checkout), `paymentStatus` / `paymentMethod` / `paymentIntentId` on orders, a shared cart-total helper, and the demo product seed script.
 - **Fixed:** `Order.productsOrdered` silently dropped `quantity` and `subtotal` on every save; all three fields are now stored.
 - **Fixed:** Checkout reported "cart is empty" if the webhook had already created the order; it now returns the existing order.
