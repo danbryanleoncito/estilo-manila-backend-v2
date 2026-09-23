@@ -3,6 +3,7 @@ const Product = require("../models/product");
 
 const { errorHandler } = require("../auth");
 const { recomputeCartTotal } = require("../utils/cartTotal");
+const { MAX_QTY_PER_LINE, maxPurchasable } = require("../utils/limits");
 
 module.exports.addToCart = async (req, res) => {
   try {
@@ -40,6 +41,14 @@ module.exports.addToCart = async (req, res) => {
       return res.status(409).send({
         message: `Only ${available} of ${product.name} available (${alreadyInCart} already in your cart)`,
         available,
+        maxPurchasable: maxPurchasable(available),
+      });
+    }
+    if (alreadyInCart + qty > MAX_QTY_PER_LINE) {
+      return res.status(409).send({
+        message: `You can buy at most ${MAX_QTY_PER_LINE} of one item (${alreadyInCart} already in your cart)`,
+        available,
+        maxPurchasable: MAX_QTY_PER_LINE,
       });
     }
 
@@ -141,10 +150,14 @@ module.exports.updateCartQuantity = async (req, res) => {
         cart.cartItems.splice(itemIndex, 1);
       } else {
         const product = cart.cartItems[itemIndex].productId;
-        if (quantity > (product.stock ?? 0)) {
+        if (quantity > maxPurchasable(product.stock)) {
           return res.status(409).send({
-            message: `Only ${product.stock ?? 0} of ${product.name} available`,
+            message:
+              quantity > (product.stock ?? 0)
+                ? `Only ${product.stock ?? 0} of ${product.name} available`
+                : `You can buy at most ${MAX_QTY_PER_LINE} of one item`,
             available: product.stock ?? 0,
+            maxPurchasable: maxPurchasable(product.stock),
           });
         }
         const updatedSubtotal = Number(product.price) * quantity;
@@ -156,10 +169,14 @@ module.exports.updateCartQuantity = async (req, res) => {
       if (!product) {
         return res.status(404).send({ message: "Product not found" });
       }
-      if (quantity > (product.stock ?? 0)) {
+      if (quantity > maxPurchasable(product.stock)) {
         return res.status(409).send({
-          message: `Only ${product.stock ?? 0} of ${product.name} available`,
+          message:
+            quantity > (product.stock ?? 0)
+              ? `Only ${product.stock ?? 0} of ${product.name} available`
+              : `You can buy at most ${MAX_QTY_PER_LINE} of one item`,
           available: product.stock ?? 0,
+          maxPurchasable: maxPurchasable(product.stock),
         });
       }
 

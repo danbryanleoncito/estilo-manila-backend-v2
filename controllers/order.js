@@ -1,36 +1,30 @@
 const Order = require("../models/order");
 const Cart = require("../models/cart");
+const PaymentSnapshot = require("../models/paymentSnapshot");
+const Dispute = require("../models/dispute");
+const { resolveDispute } = require("../utils/disputes");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const { placeOrderFromCart } = require("../utils/placeOrder");
-const { refundPayment } = require("../utils/refund");
+const {
+  placeOrderFromCart,
+  placeOrderFromSnapshot,
+  reconcileOrder,
+} = require("../utils/placeOrder");
 
 module.exports.checkout = async (req, res) => {
   try {
     const userId = req.user.id;
     const { paymentIntentId } = req.body;
 
-    // Check idempotency before touching the cart: if the webhook already turned this
-    // payment into an Order (and deleted the cart), the cart-empty check below would
-    // otherwise mask that and report a false failure.
+    // ---- Card payment: build the order from what was actually charged (the snapshot). ----
     if (paymentIntentId) {
+      // Idempotency first: the webhook may already have created this order.
       const existingOrder = await Order.findOne({ paymentIntentId });
       if (existingOrder) {
+        await reconcileOrder(existingOrder);
         return res.status(200).send({ message: "Order already placed", order: existingOrder });
       }
-    }
 
-    const cart = await Cart.findOne({ userId });
-    if (!cart || cart.cartItems.length === 0) {
-      return res.status(400).send({ message: "Your cart is empty" });
-    }
-
-    let paymentStatus = "COD";
-    let paymentMethod = "cod";
-    let verifiedIntentId = null;
-
-    if (paymentIntentId) {
       const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
-
       if (!intent || intent.status !== "succeeded") {
         return res.status(400).send({ message: "Payment has not succeeded yet" });
       }
@@ -38,32 +32,62 @@ module.exports.checkout = async (req, res) => {
         return res.status(403).send({ message: "This payment does not belong to the current user" });
       }
 
-      paymentStatus = "Paid";
-      paymentMethod = "card";
-      verifiedIntentId = paymentIntentId;
+      const snapshot = await PaymentSnapshot.findOne({ paymentIntentId });
+      if (
+        !snapshot ||
+        snapshot.userId !== String(userId) ||
+        Math.round(snapshot.amount * 100) !== intent.amount
+      ) {
+        // The webhook refunds payments it cannot match to a snapshot.
+        return res.status(409).send({
+          message:
+            "We could not match this payment to your cart. It will be refunded automatically; please try checking out again.",
+        });
+      }
+
+      const result = await placeOrderFromSnapshot({
+        userId: String(userId),
+        snapshot,
+        paymentIntentId,
+      });
+
+      if (!result.ok) {
+        return res.status(409).send({
+          message: "None of these items are available any more. Your payment has been fully refunded.",
+          outOfStock: result.shortages,
+        });
+      }
+      if (result.alreadyPlaced) {
+        return res.status(200).send({ message: "Order already placed", order: result.order });
+      }
+      return res.status(200).send({
+        message:
+          result.disputesOpened > 0
+            ? "Order placed. Some items were only partly available and need your decision."
+            : "Ordered successfully",
+        order: result.order,
+        disputesOpened: result.disputesOpened || 0,
+      });
+    }
+
+    // ---- Cash on Delivery: all-or-nothing, nothing has been charged. ----
+    const cart = await Cart.findOne({ userId });
+    if (!cart || cart.cartItems.length === 0) {
+      return res.status(400).send({ message: "Your cart is empty" });
     }
 
     const result = await placeOrderFromCart({
       userId,
       cart,
-      paymentStatus,
-      paymentMethod,
-      paymentIntentId: verifiedIntentId,
+      paymentStatus: "COD",
+      paymentMethod: "cod",
     });
 
     if (!result.ok) {
-      // Card payments are already charged by now, so give the money back.
-      if (verifiedIntentId) await refundPayment(verifiedIntentId);
       return res.status(409).send({
-        message: verifiedIntentId
-          ? "Some items just sold out. Your payment has been refunded."
-          : "Some items are out of stock",
+        message: "Some items are out of stock",
         outOfStock: result.shortages,
       });
-    }
-
-    if (result.alreadyPlaced) {
-      return res.status(200).send({ message: "Order already placed", order: result.order });
     }
 
     res.status(200).send({ message: "Ordered successfully", order: result.order });
@@ -104,5 +128,41 @@ module.exports.getAllOrders = async (req, res) => {
     res
       .status(500)
       .send({ message: "Error retrieving orders", error: error.message });
+  }
+};
+
+// ---- Shortfall disputes (paid card orders where a line was only partly available) ----
+
+module.exports.getMyDisputes = async (req, res) => {
+  try {
+    const disputes = await Dispute.find({ userId: String(req.user.id) }).sort({ createdAt: -1 });
+    res.status(200).send({ disputes });
+  } catch (error) {
+    res.status(500).send({ message: "Error retrieving disputes", error: error.message });
+  }
+};
+
+module.exports.getAllDisputes = async (req, res) => {
+  try {
+    const disputes = await Dispute.find({}).sort({ createdAt: -1 });
+    res.status(200).send({ disputes });
+  } catch (error) {
+    res.status(500).send({ message: "Error retrieving disputes", error: error.message });
+  }
+};
+
+// body: { action: "cancel" } or { action: "reduce", quantity: n }
+module.exports.resolveDisputeById = async (req, res) => {
+  try {
+    const result = await resolveDispute({
+      id: req.params.id,
+      userId: req.user.id,
+      action: req.body.action,
+      quantity: req.body.quantity,
+    });
+    if (!result.ok) return res.status(result.code).send({ message: result.message });
+    res.status(200).send({ message: "Dispute resolved", dispute: result.dispute });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to resolve dispute", error: error.message });
   }
 };

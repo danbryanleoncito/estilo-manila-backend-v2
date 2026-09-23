@@ -1,13 +1,15 @@
 const Product = require("../models/product");
+const { maxPurchasable } = require("./limits");
 
 // The only place stock is changed. Uses atomic conditional updates (no transactions:
 // the deployment is not guaranteed to be a replica set), with manual rollback.
 
+// `available` here is what may be bought right now: live stock capped at 99 per line.
 module.exports.findShortages = async (cartItems) => {
   const shortages = [];
   for (const item of cartItems) {
     const product = await Product.findById(item.productId);
-    const available = product ? product.stock ?? 0 : 0;
+    const available = product ? maxPurchasable(product.stock) : 0;
     if (!product || available < item.quantity) {
       shortages.push({
         productId: String(item.productId),
@@ -29,6 +31,18 @@ const releaseStock = async (items) => {
   }
 };
 module.exports.releaseStock = releaseStock;
+
+// Takes as many of `qty` units as are available, atomically (one pipeline update, so
+// concurrent buyers can never push stock below zero). Returns the units actually taken.
+module.exports.reserveUpTo = async (productId, qty) => {
+  const before = await Product.findOneAndUpdate(
+    { _id: productId },
+    [{ $set: { stock: { $max: [0, { $subtract: [{ $ifNull: ["$stock", 0] }, qty] }] } } }],
+    { returnDocument: "before", projection: { stock: 1 } }
+  );
+  if (!before) return 0;
+  return Math.min(before.stock ?? 0, qty);
+};
 
 module.exports.reserveStock = async (cartItems) => {
   const reserved = [];
