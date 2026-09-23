@@ -14,9 +14,10 @@ _Integrated by Dan Leoncito._
   (admin) list them. An unresolved dispute is auto-cancelled and refunded after 24 hours by a sweep
   that runs at boot and every 5 minutes.
 - Strict purchase quantity: a cart line is capped at `min(available stock, 99)`, enforced at
-  add-to-cart, quantity update, payment-intent creation and checkout. New public
-  `GET /product/stock?ids=a,b,c` (max 50 ids, 2s in-memory cache) returns live `stock` and
-  `maxPurchasable` for a real-time limiter; it is advisory, the atomic decrement stays the guarantee.
+  add-to-cart, quantity update, payment-intent creation and checkout. Rejections return
+  `409 { message, available, maxPurchasable }`, and the limit is derived from the stock already
+  returned by the product and cart endpoints (no polling endpoint; the atomic decrement at purchase
+  time stays the guarantee).
 - Payment snapshots: card orders are built from what was frozen when the payment intent was created,
   so the checkout and the webhook can never create an order that differs from the charge (the cart is
   no longer re-read at payment time).

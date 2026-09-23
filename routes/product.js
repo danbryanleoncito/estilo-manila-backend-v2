@@ -14,9 +14,6 @@ router.get("/all", verify, verifyAdmin, productController.getAllProduct);
 //[SECTION] Two added routes for the activity
 router.get("/active", productController.getAllActive);
 
-// Live stock for the quantity limiter. Must stay above "/:productId" or "stock" is read as an id.
-router.get("/stock", productController.getStockBatch);
-
 router.get("/:productId", productController.getProduct);
 
 //[SECTION] Route for updating a product (Admin)
