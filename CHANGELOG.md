@@ -3,6 +3,7 @@
 All notable changes to this backend are documented in this file.
 
 ## [1.1.1] - 2026-09-22
+_Integrated by Dan Leoncito._
 
 ### Fixed
 - `createPaymentIntent` created PaymentIntents with `automatic_payment_methods: { enabled: true }`,
@@ -13,6 +14,7 @@ All notable changes to this backend are documented in this file.
   when required, shows as an on-page popup instead of a redirect).
 
 ## [1.1.0] - 2026-09-22
+_Integrated by Dan Leoncito._
 
 ### Added
 - Stripe **test-mode** payment integration:
