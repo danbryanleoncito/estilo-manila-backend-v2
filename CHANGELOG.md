@@ -2,6 +2,33 @@
 
 All notable changes to this backend are documented in this file.
 
+## [1.3.0] - 2026-09-24
+_Integrated by Dan Leoncito._
+
+### Added
+- Shortfall disputes. When a card payment succeeds but a line is only partly available (ordered 5,
+  4 left), the order is created, the available units are held (taken out of `Product.stock`), and a
+  `Dispute` is opened. `POST /order/disputes/:id/resolve` with `{ action: "cancel" }` or
+  `{ action: "reduce", quantity: n }` refunds the difference through a partial Stripe refund and puts
+  the unused held units back in stock. `GET /order/disputes` (mine) and `GET /order/disputes/all`
+  (admin) list them. An unresolved dispute is auto-cancelled and refunded after 24 hours by a sweep
+  that runs at boot and every 5 minutes.
+- Strict purchase quantity: a cart line is capped at `min(available stock, 99)`, enforced at
+  add-to-cart, quantity update, payment-intent creation and checkout. New public
+  `GET /product/stock?ids=a,b,c` (max 50 ids, 2s in-memory cache) returns live `stock` and
+  `maxPurchasable` for a real-time limiter; it is advisory, the atomic decrement stays the guarantee.
+- Payment snapshots: card orders are built from what was frozen when the payment intent was created,
+  so the checkout and the webhook can never create an order that differs from the charge (the cart is
+  no longer re-read at payment time).
+- Order lines now record `unitPrice`, `requestedQuantity`, `lineStatus`
+  (`Fulfilled | Disputed | Adjusted | Cancelled`) and `refundedAmount`; orders record
+  `refundedAmount` (and `totalPrice` is the net amount after refunds).
+
+### Changed
+- A paid item selling out no longer refunds the whole order. Lines with no units available are
+  refunded immediately and the rest of the order is fulfilled; only when nothing is available is the
+  whole payment refunded and no order created. Cash on Delivery is unchanged (short cart -> 409).
+
 ## [1.2.0] - 2026-09-24
 _Integrated by Dan Leoncito._
 

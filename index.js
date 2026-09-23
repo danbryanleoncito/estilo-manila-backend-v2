@@ -13,6 +13,7 @@ const orderRoutes = require("./routes/order");
 
 const paymentRoutes = require("./routes/payment");
 const paymentController = require("./controllers/payment");
+const { expireDisputes } = require("./utils/disputes");
 
 const app = express();
 
@@ -66,6 +67,18 @@ if (require.main === module) {
   app.listen(process.env.PORT || 3004, () => {
     console.log(`API is now online on port ${process.env.PORT || 3004}`);
   });
+
+  // Auto-cancel + refund shortfall disputes the customer never resolved (24h), and finish
+  // any that got stuck. Runs at boot (Render may have slept through an expiry) and every
+  // 5 minutes. Only when run directly, never when imported.
+  const sweepDisputes = () =>
+    expireDisputes()
+      .then((r) => {
+        if (r.expired || r.retried) console.log("Dispute sweep:", r);
+      })
+      .catch((err) => console.error("Dispute sweep failed:", err.message));
+  sweepDisputes();
+  setInterval(sweepDisputes, 5 * 60 * 1000);
 }
 
 module.exports = { app, mongoose };

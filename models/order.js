@@ -19,12 +19,28 @@ const orderSchema = new mongoose.Schema({
         type: Number,
         required: [true, "subtotal is Required"],
       },
+      // Price per unit at purchase time, and what the customer originally ordered.
+      // `quantity` is what is currently kept (or held, while a dispute is open).
+      unitPrice: { type: Number },
+      requestedQuantity: { type: Number },
+      lineStatus: {
+        type: String,
+        enum: ["Fulfilled", "Disputed", "Adjusted", "Cancelled"],
+        default: "Fulfilled",
+      },
+      refundedAmount: { type: Number, default: 0 },
     },
   ],
+  // Net amount: what was charged minus any refunds issued so far.
   totalPrice: {
     type: Number,
     required: [true, "Total Price is Required"],
   },
+  refundedAmount: { type: Number, default: 0 },
+  // Pesos still owed back for lines that were unavailable at order time. Set when the order
+  // is created and cleared once Stripe confirms the refund, so a failed refund is retried
+  // (see reconcileOrder) instead of leaving the customer overcharged.
+  pendingRefund: { type: Number, default: 0 },
   orderedOn: {
     type: Date,
     default: Date.now,

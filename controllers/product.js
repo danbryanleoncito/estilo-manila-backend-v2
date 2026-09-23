@@ -3,6 +3,64 @@ const Product = require("../models/product");
 const User = require("../models/user");
 const { errorHandler } = require("../auth");
 
+const mongoose = require("mongoose");
+const { maxPurchasable } = require("../utils/limits");
+
+// Live stock for the quantity limiter. Advisory only (the atomic decrement at purchase time
+// is what actually prevents overselling), so a short in-memory cache is safe and keeps a
+// crowd of viewers from hammering MongoDB. Single-instance only; use Redis if scaled out.
+const STOCK_CACHE_TTL_MS = 2000;
+const MAX_STOCK_IDS = 50;
+const stockCache = new Map(); // id -> { stock, at }
+
+// GET /product/stock?ids=a,b,c  ->  { [id]: { stock, maxPurchasable } }
+module.exports.getStockBatch = async (req, res) => {
+  try {
+    const ids = [
+      ...new Set(
+        String(req.query.ids || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      ),
+    ];
+    if (ids.length === 0 || ids.length > MAX_STOCK_IDS) {
+      return res
+        .status(400)
+        .send({ message: `Provide between 1 and ${MAX_STOCK_IDS} product ids` });
+    }
+    if (!ids.every((id) => mongoose.isValidObjectId(id))) {
+      return res.status(400).send({ message: "Invalid product id" });
+    }
+
+    const now = Date.now();
+    const missing = ids.filter((id) => {
+      const hit = stockCache.get(id);
+      return !hit || now - hit.at > STOCK_CACHE_TTL_MS;
+    });
+    if (missing.length > 0) {
+      const docs = await Product.find({ _id: { $in: missing } }, "stock").lean();
+      const found = new Set();
+      for (const d of docs) {
+        stockCache.set(String(d._id), { stock: d.stock ?? 0, at: now });
+        found.add(String(d._id));
+      }
+      // Unknown products are not cached, so a later-created id is picked up immediately.
+      for (const id of missing) if (!found.has(id)) stockCache.delete(id);
+    }
+
+    const result = {};
+    for (const id of ids) {
+      const hit = stockCache.get(id);
+      if (hit) result[id] = { stock: hit.stock, maxPurchasable: maxPurchasable(hit.stock) };
+    }
+    res.set("Cache-Control", "public, max-age=2");
+    res.status(200).send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to load stock", error: error.message });
+  }
+};
+
 // Returns the stock as a number, undefined when not supplied, or null when invalid.
 const parseStock = (value) => {
   if (value === undefined || value === null || value === "") return undefined;

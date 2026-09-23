@@ -64,9 +64,9 @@ All routes are prefixed with `/b4`.
 | Area | Endpoints |
 | --- | --- |
 | Users | `POST /users/register`, `POST /users/login`, `GET /users/details`, `PATCH /users/update-password`, `PATCH /users/:id/set-as-admin` (admin) |
-| Products | `GET /product/active`, `GET /product/:productId`, `POST /product/search-by-name`, `POST /product/search-by-price`; admin: `POST /product`, `GET /product/all`, `PATCH /product/:productId/update`, `.../archive`, `.../activate` |
+| Products | `GET /product/active`, `GET /product/stock?ids=a,b,c` (live stock, max 50 ids), `GET /product/:productId`, `POST /product/search-by-name`, `POST /product/search-by-price`; admin: `POST /product`, `GET /product/all`, `PATCH /product/:productId/update`, `.../archive`, `.../activate` |
 | Cart | `POST /cart/add-to-cart`, `GET /cart/get-cart`, `PATCH /cart/update-cart-quantity`, `PATCH /cart/:productId/remove-from-cart`, `PUT /cart/clear-cart` |
-| Orders | `POST /order/checkout`, `GET /order/my-orders`, `GET /order/all-orders` (admin) |
+| Orders | `POST /order/checkout`, `GET /order/my-orders`, `GET /order/all-orders` (admin), `GET /order/disputes`, `POST /order/disputes/:id/resolve`, `GET /order/disputes/all` (admin) |
 | Payments | `POST /payment/create-payment-intent`, `POST /payment/webhook` (called by Stripe, not by clients) |
 
 `EcommerceAPI.postman_collection.json` is a request collection for the API.
@@ -86,13 +86,24 @@ All routes are prefixed with `/b4`.
 - Each product has a `stock` count (whole number, default 0). Admins set it via `POST /product` and `PATCH /product/:productId/update`. A product with `stock: 0` is out of stock; the API still returns it, so the storefront can show it as sold out.
 - `addToCart` and `PATCH /cart/update-cart-quantity` refuse quantities above the available stock, and `POST /payment/create-payment-intent` refuses to charge for a cart that is short.
 - Stock is decremented when the order is created, by both `POST /order/checkout` and the Stripe webhook, through one shared step, so a payment never decrements twice.
-- If a card payment succeeds but the item sold out in between, the payment is refunded automatically through Stripe and no order is created.
+- **Strict quantity:** a line can hold at most `min(available stock, 99)` units. `GET /product/stock?ids=a,b,c` returns `{ [id]: { stock, maxPurchasable } }` for the live limiter. It is advisory and cached for 2 seconds (single backend instance); the atomic decrement at purchase time is what actually prevents overselling.
+- **Card orders are built from a payment snapshot** taken when the payment intent is created, so the order always matches what was charged, even if the cart is edited afterwards.
+- **If an item runs short after a card payment**, only that line is affected instead of the whole order:
+  - Some units available (e.g. ordered 5, 4 left): the order is created, the available units are held for the customer, and a *dispute* is opened. The customer resolves it with `POST /order/disputes/:id/resolve` and `{ "action": "cancel" }` (that line is refunded) or `{ "action": "reduce", "quantity": n }` (keep `n` from 1 up to the held units, the difference is refunded). Held units go back to stock once resolved. An unresolved dispute is auto-cancelled and refunded after 24 hours.
+  - No units available: that line is refunded immediately and the rest of the order is fulfilled.
+  - Nothing available at all: the whole payment is refunded and no order is created.
+- Cash on Delivery has no payment to refund, so a short cart is simply rejected with a 409.
 - Stock problems return `409 { message, outOfStock: [{ productId, name, requested, available }] }`.
 - **Before deploying to a database that already has products, run `node scripts/backfillStock.js [startingStock]` once** (default 25). It only touches products that have no `stock` field and is safe to re-run. Without it those products cannot be bought.
 
 ## Patch Notes
 
 Full history is in [CHANGELOG.md](CHANGELOG.md). Summary:
+
+### v1.3.0 (2026-09-24)
+_Integrated by Dan Leoncito._
+- **Added:** Per-line handling of stock shortages after a card payment: partial refunds instead of refunding the whole cart, and shortfall disputes (cancel the line or reduce its quantity, with the available units held until resolved and auto-cancelled after 24h).
+- **Added:** Strict purchase quantity: `min(stock, 99)` per line, a live `GET /product/stock` endpoint for the limiter, and card orders built from a payment snapshot so they always match the charge.
 
 ### v1.2.0 (2026-09-24)
 _Integrated by Dan Leoncito._
