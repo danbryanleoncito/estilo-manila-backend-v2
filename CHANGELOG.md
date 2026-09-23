@@ -2,6 +2,33 @@
 
 All notable changes to this backend are documented in this file.
 
+## [1.2.0] - 2026-09-24
+_Integrated by Dan Leoncito._
+
+### Added
+- Product stock: `Product.stock` (whole number >= 0, default 0). Admins set it through
+  `POST /product` and `PATCH /product/:id/update` (validated, 400 on invalid values).
+- Stock enforcement everywhere an order is affected: `addToCart` and `updateCartQuantity` reject
+  quantities above stock (409), `createPaymentIntent` refuses to charge for short carts, and
+  checkout/the Stripe webhook decrement stock atomically through one shared order-creation step
+  (`utils/placeOrder.js`, `utils/stock.js`), so a payment never decrements twice.
+- If a card payment succeeds but the item sold out in the meantime, the payment is automatically
+  refunded through Stripe (idempotent) and no order is created. Shortages return
+  `409 { message, outOfStock: [{ productId, name, requested, available }] }`.
+- `scripts/backfillStock.js` gives existing products a starting stock (idempotent). **Run it against
+  the live database before deploying this release** — products without a `stock` field cannot be
+  bought.
+- The seed script now assigns each demo product a stock of 5-50.
+
+### Fixed
+- The second Cash on Delivery order failed with `E11000 duplicate key ... paymentIntentId: null`:
+  COD orders stored `paymentIntentId: null`, and a sparse unique index still indexes `null`. The field
+  is now left absent on COD orders.
+- `addToCart` concatenated a string quantity onto the existing quantity (`"2"` + `"2"` = `"22"`);
+  quantity is now validated as a whole number >= 1 and coerced to a number.
+- `updateCartQuantity` returned a NaN-total 400 when it added a brand-new line; it now recomputes the
+  total with the shared helper.
+
 ## [1.1.1] - 2026-09-22
 _Integrated by Dan Leoncito._
 

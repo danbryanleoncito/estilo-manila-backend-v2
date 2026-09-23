@@ -2,6 +2,7 @@ const Cart = require("../models/cart");
 const Product = require("../models/product");
 
 const { errorHandler } = require("../auth");
+const { recomputeCartTotal } = require("../utils/cartTotal");
 
 module.exports.addToCart = async (req, res) => {
   try {
@@ -13,23 +14,46 @@ module.exports.addToCart = async (req, res) => {
       return res.status(404).send({ message: "Product not found" });
     }
 
-    const subtotal = product.price * quantity;
+    // The UI sends quantity as a string; coerce and validate it (a string used to be
+    // concatenated onto the existing quantity, e.g. "2" + "2" = "22").
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty < 1) {
+      return res
+        .status(400)
+        .send({ message: "Quantity must be a whole number of at least 1" });
+    }
 
     let cart = await Cart.findOne({ userId });
 
+    const itemIndex = cart
+      ? cart.cartItems.findIndex((p) => p.productId == productId)
+      : -1;
+    const alreadyInCart = itemIndex > -1 ? cart.cartItems[itemIndex].quantity : 0;
+
+    const available = product.stock ?? 0;
+    if (available <= 0) {
+      return res
+        .status(409)
+        .send({ message: `${product.name} is out of stock`, available: 0 });
+    }
+    if (alreadyInCart + qty > available) {
+      return res.status(409).send({
+        message: `Only ${available} of ${product.name} available (${alreadyInCart} already in your cart)`,
+        available,
+      });
+    }
+
+    const subtotal = product.price * qty;
+
     if (cart) {
       // If cart exists for the user
-      const itemIndex = cart.cartItems.findIndex(
-        (p) => p.productId == productId
-      );
-
       if (itemIndex > -1) {
         // If product already exists in cart, update quantity and subtotal
-        cart.cartItems[itemIndex].quantity += quantity;
+        cart.cartItems[itemIndex].quantity += qty;
         cart.cartItems[itemIndex].subtotal += subtotal;
       } else {
         // If product does not exist in cart, add new item
-        cart.cartItems.push({ productId, quantity, subtotal });
+        cart.cartItems.push({ productId, quantity: qty, subtotal });
       }
 
       let totalPrice = 0;
@@ -44,7 +68,7 @@ module.exports.addToCart = async (req, res) => {
       // If no cart exists, create a new one
       cart = new Cart({
         userId,
-        cartItems: [{ productId, quantity, subtotal }],
+        cartItems: [{ productId, quantity: qty, subtotal }],
         totalPrice: subtotal,
       });
     }
@@ -97,7 +121,7 @@ module.exports.updateCartQuantity = async (req, res) => {
     const productId = req.body.productId;
     const quantity = Number(req.body.quantity); // Convert quantity to number
 
-    if (isNaN(quantity) || quantity < 0) {
+    if (!Number.isInteger(quantity) || quantity < 0) {
       return res.status(400).send({ message: "Invalid quantity" });
     }
 
@@ -117,6 +141,12 @@ module.exports.updateCartQuantity = async (req, res) => {
         cart.cartItems.splice(itemIndex, 1);
       } else {
         const product = cart.cartItems[itemIndex].productId;
+        if (quantity > (product.stock ?? 0)) {
+          return res.status(409).send({
+            message: `Only ${product.stock ?? 0} of ${product.name} available`,
+            available: product.stock ?? 0,
+          });
+        }
         const updatedSubtotal = Number(product.price) * quantity;
         cart.cartItems[itemIndex].quantity = quantity;
         cart.cartItems[itemIndex].subtotal = updatedSubtotal;
@@ -125,6 +155,12 @@ module.exports.updateCartQuantity = async (req, res) => {
       const product = await Product.findById(productId);
       if (!product) {
         return res.status(404).send({ message: "Product not found" });
+      }
+      if (quantity > (product.stock ?? 0)) {
+        return res.status(409).send({
+          message: `Only ${product.stock ?? 0} of ${product.name} available`,
+          available: product.stock ?? 0,
+        });
       }
 
       const newItem = {
@@ -136,11 +172,9 @@ module.exports.updateCartQuantity = async (req, res) => {
       cart.cartItems.push(newItem);
     }
 
-    let totalPrice = cart.cartItems.reduce((sum, item) => {
-      const itemPrice = Number(item.productId.price);
-      const itemQuantity = Number(item.quantity);
-      return sum + itemPrice * itemQuantity;
-    }, 0);
+    // Uses the shared helper: the old inline sum read `productId.price`, which is
+    // undefined (NaN total) for a line just pushed with an unpopulated productId.
+    const totalPrice = await recomputeCartTotal(cart.cartItems);
 
     if (isNaN(totalPrice)) {
       console.error("Total price calculation resulted in NaN:", totalPrice);

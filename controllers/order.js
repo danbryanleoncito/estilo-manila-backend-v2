@@ -1,7 +1,8 @@
 const Order = require("../models/order");
 const Cart = require("../models/cart");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const { recomputeCartTotal } = require("../utils/cartTotal");
+const { placeOrderFromCart } = require("../utils/placeOrder");
+const { refundPayment } = require("../utils/refund");
 
 module.exports.checkout = async (req, res) => {
   try {
@@ -23,8 +24,6 @@ module.exports.checkout = async (req, res) => {
       return res.status(400).send({ message: "Your cart is empty" });
     }
 
-    const totalPrice = await recomputeCartTotal(cart.cartItems);
-
     let paymentStatus = "COD";
     let paymentMethod = "cod";
     let verifiedIntentId = null;
@@ -44,29 +43,30 @@ module.exports.checkout = async (req, res) => {
       verifiedIntentId = paymentIntentId;
     }
 
-    const order = new Order({
+    const result = await placeOrderFromCart({
       userId,
-      productsOrdered: cart.cartItems,
-      totalPrice,
+      cart,
       paymentStatus,
       paymentMethod,
       paymentIntentId: verifiedIntentId,
     });
 
-    try {
-      await order.save();
-    } catch (saveErr) {
-      if (saveErr.code === 11000 && verifiedIntentId) {
-        const raceOrder = await Order.findOne({ paymentIntentId: verifiedIntentId });
-        return res.status(200).send({ message: "Order already placed", order: raceOrder });
-      }
-      throw saveErr;
+    if (!result.ok) {
+      // Card payments are already charged by now, so give the money back.
+      if (verifiedIntentId) await refundPayment(verifiedIntentId);
+      return res.status(409).send({
+        message: verifiedIntentId
+          ? "Some items just sold out. Your payment has been refunded."
+          : "Some items are out of stock",
+        outOfStock: result.shortages,
+      });
     }
 
-    // Clear the cart after placing the order
-    await Cart.findOneAndDelete({ userId });
+    if (result.alreadyPlaced) {
+      return res.status(200).send({ message: "Order already placed", order: result.order });
+    }
 
-    res.status(200).send({ message: "Ordered successfully", order });
+    res.status(200).send({ message: "Ordered successfully", order: result.order });
   } catch (error) {
     res.status(500).send({ message: "Checkout failed", error: error.message });
   }

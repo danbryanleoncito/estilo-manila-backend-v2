@@ -38,9 +38,11 @@ const orderSchema = new mongoose.Schema({
     enum: ["COD", "Unpaid", "Paid", "Failed"],
     default: "Unpaid",
   },
+  // No default: a sparse unique index still indexes an explicit null, so storing null on
+  // COD orders would make the second COD order fail with E11000. Leave the field absent.
   paymentIntentId: {
     type: String,
-    default: null,
+    default: undefined,
     index: { unique: true, sparse: true },
   },
   paymentMethod: {
