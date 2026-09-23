@@ -2,6 +2,9 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const Cart = require("../models/cart");
 const Order = require("../models/order");
 const { recomputeCartTotal } = require("../utils/cartTotal");
+const { findShortages } = require("../utils/stock");
+const { placeOrderFromCart } = require("../utils/placeOrder");
+const { refundPayment } = require("../utils/refund");
 
 module.exports.createPaymentIntent = async (req, res) => {
   try {
@@ -10,6 +13,14 @@ module.exports.createPaymentIntent = async (req, res) => {
     const cart = await Cart.findOne({ userId });
     if (!cart || cart.cartItems.length === 0) {
       return res.status(400).send({ message: "Your cart is empty" });
+    }
+
+    // Never charge for items that are not available.
+    const shortages = await findShortages(cart.cartItems);
+    if (shortages.length > 0) {
+      return res
+        .status(409)
+        .send({ message: "Some items are out of stock", outOfStock: shortages });
     }
 
     const totalPrice = await recomputeCartTotal(cart.cartItems);
@@ -72,27 +83,25 @@ module.exports.handleWebhook = async (req, res) => {
         return res.status(200).json({ received: true });
       }
 
-      const totalPrice = await recomputeCartTotal(cart.cartItems);
+      const result = await placeOrderFromCart({
+        userId,
+        cart,
+        paymentStatus: "Paid",
+        paymentMethod: "card",
+        paymentIntentId,
+      });
 
-      try {
-        const order = new Order({
-          userId,
-          productsOrdered: cart.cartItems,
-          totalPrice,
-          paymentStatus: "Paid",
-          paymentMethod: "card",
-          paymentIntentId,
-        });
-        await order.save();
-        await Cart.findOneAndDelete({ userId });
-      } catch (saveErr) {
-        if (saveErr.code === 11000) {
-          console.warn(
-            `Order for paymentIntentId ${paymentIntentId} already created by checkout; ignoring webhook duplicate.`
-          );
-        } else {
-          throw saveErr;
-        }
+      if (!result.ok) {
+        // Paid, but the item sold out in the meantime: refund instead of overselling.
+        console.warn(
+          `PaymentIntent ${paymentIntentId} paid but out of stock; refunding.`,
+          JSON.stringify(result.shortages)
+        );
+        await refundPayment(paymentIntentId);
+      } else if (result.alreadyPlaced) {
+        console.warn(
+          `Order for paymentIntentId ${paymentIntentId} already created by checkout; ignoring webhook duplicate.`
+        );
       }
     } else if (event.type === "payment_intent.payment_failed") {
       const intent = event.data.object;

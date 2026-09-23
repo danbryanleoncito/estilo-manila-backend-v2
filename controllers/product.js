@@ -3,7 +3,21 @@ const Product = require("../models/product");
 const User = require("../models/user");
 const { errorHandler } = require("../auth");
 
+// Returns the stock as a number, undefined when not supplied, or null when invalid.
+const parseStock = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+};
+
 module.exports.addProduct = (req, res) => {
+  const stock = parseStock(req.body.stock);
+  if (stock === null) {
+    return res
+      .status(400)
+      .send({ message: "Stock must be a whole number of 0 or more" });
+  }
+
   // Creates a variable "newProduct" and instantiates a new "Product" object using the mongoose model
   // Uses the information from the request body to provide all the necessary information
 
@@ -12,6 +26,7 @@ module.exports.addProduct = (req, res) => {
     description: req.body.description,
     price: req.body.price,
     image: req.body.image,
+    stock,
   });
 
   //[SECTION] Activity: Validate if product already exists
@@ -88,11 +103,19 @@ module.exports.getProduct = (req, res) => {
 };
 
 module.exports.updateProduct = (req, res) => {
+  const stock = parseStock(req.body.stock);
+  if (stock === null) {
+    return res
+      .status(400)
+      .send({ message: "Stock must be a whole number of 0 or more" });
+  }
+
   let updatedProduct = {
     name: req.body.name,
     description: req.body.description,
     price: req.body.price,
     image: req.body.image,
+    stock,
   };
 
   // findByIdandUpdate() finds the the document in the db and updates it automatically

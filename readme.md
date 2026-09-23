@@ -44,7 +44,7 @@ npm run dev            # nodemon; or `npm start` for plain node (default port 30
 
 The webhook secret must match the endpoint that Stripe is calling:
 
-- **Local:** run `stripe listen --forward-to localhost:3004/b4/payment/webhook`. It prints a new `whsec_...` every time it starts, so update `.env` after restarting it.
+- **Local:** run `stripe listen --forward-to localhost:3004/b4/payment/webhook`. It prints a `whsec_...` signing secret for your CLI login (it stays the same between restarts); put it in `.env`. If Stripe ever shows a different one, update `.env` to match.
 - **Deployed:** create a webhook endpoint in the Stripe Dashboard (test mode) pointing at `https://<your-host>/b4/payment/webhook`, subscribed to `payment_intent.succeeded` and `payment_intent.payment_failed`, and use that endpoint's signing secret.
 
 ### Optional: seed demo products
@@ -81,9 +81,24 @@ All routes are prefixed with `/b4`.
 - The webhook route is registered with a raw body parser **before** `express.json()` in `index.js`. Signature verification breaks if that order changes.
 - Use Stripe's test cards, e.g. `4242 4242 4242 4242` (success), `4000 0027 6000 3184` (3D Secure), `4000 0000 0000 0002` (declined), with any future expiry and any CVC. No real money is ever charged.
 
+## Stock
+
+- Each product has a `stock` count (whole number, default 0). Admins set it via `POST /product` and `PATCH /product/:productId/update`. A product with `stock: 0` is out of stock; the API still returns it, so the storefront can show it as sold out.
+- `addToCart` and `PATCH /cart/update-cart-quantity` refuse quantities above the available stock, and `POST /payment/create-payment-intent` refuses to charge for a cart that is short.
+- Stock is decremented when the order is created, by both `POST /order/checkout` and the Stripe webhook, through one shared step, so a payment never decrements twice.
+- If a card payment succeeds but the item sold out in between, the payment is refunded automatically through Stripe and no order is created.
+- Stock problems return `409 { message, outOfStock: [{ productId, name, requested, available }] }`.
+- **Before deploying to a database that already has products, run `node scripts/backfillStock.js [startingStock]` once** (default 25). It only touches products that have no `stock` field and is safe to re-run. Without it those products cannot be bought.
+
 ## Patch Notes
 
 Full history is in [CHANGELOG.md](CHANGELOG.md). Summary:
+
+### v1.2.0 (2026-09-24)
+_Integrated by Dan Leoncito._
+- **Added:** Product stock counts with out-of-stock enforcement across cart, payment-intent creation, checkout and the Stripe webhook, plus an automatic refund when a paid item sells out. Includes `scripts/backfillStock.js` (run it on existing databases before deploying).
+- **Fixed:** The second Cash on Delivery order failed with a duplicate-key error on `paymentIntentId: null`.
+- **Fixed:** Adding a string quantity to the cart concatenated instead of adding (`"2"` + `"2"` = `"22"`), and updating the cart with a new line returned a NaN total.
 
 ### v1.1.1 (2026-09-22)
 _Integrated by Dan Leoncito._

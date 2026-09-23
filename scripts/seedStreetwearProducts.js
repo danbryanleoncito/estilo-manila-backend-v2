@@ -137,7 +137,7 @@ async function run() {
   let created = 0;
   let skipped = 0;
 
-  for (const p of products) {
+  for (const [index, p] of products.entries()) {
     const existing = await Product.findOne({ name: p.name });
     if (existing) {
       skipped++;
@@ -148,6 +148,8 @@ async function run() {
       description: p.description,
       price: p.price,
       image: `https://picsum.photos/seed/${slugify(p.name)}/800/1000`,
+      // Deterministic spread of 5-50 units so the demo catalog has varied stock.
+      stock: 5 + ((index * 7) % 46),
       isActive: true,
     });
     created++;
