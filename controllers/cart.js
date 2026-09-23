@@ -1,7 +1,7 @@
 const Cart = require("../models/cart");
 const Product = require("../models/product");
 
-const { errorHandler } = require("../auth");
+const mongoose = require("mongoose");
 const { recomputeCartTotal } = require("../utils/cartTotal");
 const { MAX_QTY_PER_LINE, maxPurchasable } = require("../utils/limits");
 
@@ -10,9 +10,18 @@ module.exports.addToCart = async (req, res) => {
     const userId = req.user.id; // Assuming you have user authentication and req.user is available
     const { productId, quantity } = req.body;
 
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).send({ message: "Invalid product id" });
+    }
+
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).send({ message: "Product not found" });
+    }
+    if (product.isActive === false) {
+      return res
+        .status(409)
+        .send({ message: `${product.name} is no longer available`, available: 0, maxPurchasable: 0 });
     }
 
     // The UI sends quantity as a string; coerce and validate it (a string used to be
@@ -89,7 +98,7 @@ module.exports.addToCart = async (req, res) => {
       cart,
     });
   } catch (error) {
-    res.status(500).send({ message: errorHandler(error, req, res) });
+    res.status(500).send({ message: "Something went wrong", error: error.message });
   }
 };
 
@@ -103,7 +112,7 @@ module.exports.getCart = async (req, res) => {
     }
     res.status(200).send(cart);
   } catch (error) {
-    res.status(500).send({ message: errorHandler(error, req, res) });
+    res.status(500).send({ message: "Something went wrong", error: error.message });
   }
 };
 
@@ -128,6 +137,9 @@ module.exports.updateCartQuantity = async (req, res) => {
     }
 
     const productId = req.body.productId;
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).send({ message: "Invalid product id" });
+    }
     const quantity = Number(req.body.quantity); // Convert quantity to number
 
     if (!Number.isInteger(quantity) || quantity < 0) {
@@ -150,6 +162,13 @@ module.exports.updateCartQuantity = async (req, res) => {
         cart.cartItems.splice(itemIndex, 1);
       } else {
         const product = cart.cartItems[itemIndex].productId;
+        if (product.isActive === false && quantity > cart.cartItems[itemIndex].quantity) {
+          return res.status(409).send({
+            message: `${product.name} is no longer available`,
+            available: 0,
+            maxPurchasable: 0,
+          });
+        }
         if (quantity > maxPurchasable(product.stock)) {
           return res.status(409).send({
             message:
@@ -168,6 +187,13 @@ module.exports.updateCartQuantity = async (req, res) => {
       const product = await Product.findById(productId);
       if (!product) {
         return res.status(404).send({ message: "Product not found" });
+      }
+      if (product.isActive === false) {
+        return res.status(409).send({
+          message: `${product.name} is no longer available`,
+          available: 0,
+          maxPurchasable: 0,
+        });
       }
       if (quantity > maxPurchasable(product.stock)) {
         return res.status(409).send({
@@ -210,10 +236,7 @@ module.exports.updateCartQuantity = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating cart:", error);
-    res.status(500).send({
-      message: "An error occurred",
-      error: errorHandler(error, req, res),
-    });
+    res.status(500).send({ message: "An error occurred", error: error.message });
   }
 };
 
@@ -272,6 +295,6 @@ exports.clearCart = async (req, res) => {
 
     res.status(200).send({ message: "Cart cleared successfully", cart });
   } catch (error) {
-    res.status(500).send({ message: errorHandler(error, req, res) });
+    res.status(500).send({ message: "Something went wrong", error: error.message });
   }
 };

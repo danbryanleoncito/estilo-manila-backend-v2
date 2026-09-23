@@ -1,5 +1,6 @@
 const Order = require("../models/order");
 const Cart = require("../models/cart");
+const Product = require("../models/product");
 const Dispute = require("../models/dispute");
 const { recomputeCartTotal } = require("./cartTotal");
 const { reserveStock, releaseStock, reserveUpTo } = require("./stock");
@@ -51,10 +52,17 @@ module.exports.placeOrderFromCart = async ({
     return { ok: false, shortages: reservation.shortages };
   }
 
+  const products = await Product.find(
+    { _id: { $in: cart.cartItems.map((i) => i.productId) } },
+    "name"
+  );
+  const nameOf = Object.fromEntries(products.map((p) => [String(p._id), p.name]));
+
   const orderData = {
     userId,
     productsOrdered: cart.cartItems.map((i) => ({
       productId: String(i.productId),
+      name: nameOf[String(i.productId)],
       quantity: i.quantity,
       subtotal: i.subtotal,
       unitPrice: i.quantity ? i.subtotal / i.quantity : 0,
@@ -120,6 +128,7 @@ module.exports.placeOrderFromSnapshot = async ({
   const productsOrdered = lines.map(({ item, got }) => {
     const base = {
       productId: String(item.productId),
+      name: item.name,
       unitPrice: item.unitPrice,
       requestedQuantity: item.quantity,
     };

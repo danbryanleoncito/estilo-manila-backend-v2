@@ -9,7 +9,9 @@ module.exports.findShortages = async (cartItems) => {
   const shortages = [];
   for (const item of cartItems) {
     const product = await Product.findById(item.productId);
-    const available = product ? maxPurchasable(product.stock) : 0;
+    // An archived product can no longer be bought, whatever its stock says.
+    const available =
+      product && product.isActive !== false ? maxPurchasable(product.stock) : 0;
     if (!product || available < item.quantity) {
       shortages.push({
         productId: String(item.productId),
@@ -48,7 +50,8 @@ module.exports.reserveStock = async (cartItems) => {
   const reserved = [];
   for (const item of cartItems) {
     const result = await Product.updateOne(
-      { _id: item.productId, stock: { $gte: item.quantity } },
+      // isActive: an archived product cannot be bought even if it still has stock.
+      { _id: item.productId, stock: { $gte: item.quantity }, isActive: { $ne: false } },
       { $inc: { stock: -item.quantity } }
     );
     if (result.modifiedCount === 0) {

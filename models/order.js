@@ -19,6 +19,8 @@ const orderSchema = new mongoose.Schema({
         type: Number,
         required: [true, "subtotal is Required"],
       },
+      // Product name at purchase time, so orders stay readable after renames or deletions.
+      name: { type: String },
       // Price per unit at purchase time, and what the customer originally ordered.
       // `quantity` is what is currently kept (or held, while a dispute is open).
       unitPrice: { type: Number },
