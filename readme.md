@@ -55,6 +55,8 @@ node scripts/seedStreetwearProducts.js
 
 Adds ~24 streetwear demo products with placeholder images. It is safe to re-run; products that already exist by name are skipped.
 
+The script writes to whichever database `MONGO_STRING` points at in the `.env` you run it with. Seeding locally does **not** touch the deployed site, which uses its own database. To seed the live database, run the script with the production `MONGO_STRING` (for example from the Render shell, where it is already set).
+
 ## API Overview
 
 All routes are prefixed with `/b4`.
