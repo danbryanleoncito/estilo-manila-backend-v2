@@ -73,6 +73,7 @@ All routes are prefixed with `/b4`.
 
 ## Payments (Stripe test mode)
 
+- **Delivery address:** both `POST /order/checkout` (COD) and `POST /payment/create-payment-intent` (card) require a `shippingAddress` object: `fullName`, `phone` (Philippine mobile, `09…` or `+639…`), `addressLine1`, optional `addressLine2`, `city`, `province`, `postalCode` (4 digits) and `country` (Philippines only, the default). It is validated and normalised by `utils/address.js`, stored on the order, and a bad one is a 400 with `{ message, field }`. For card orders it is saved in the payment snapshot, so a webhook-created order has it too. Orders from before this feature have no address.
 - `POST /payment/create-payment-intent` creates a PaymentIntent (currency `php`, card only) for the logged-in user's cart. The amount is always recomputed on the server from current product prices, never taken from the client.
 - `POST /order/checkout` accepts an optional `paymentIntentId`:
   - With it, the intent is verified with Stripe (it must have succeeded and belong to the caller) and the order is saved as `paymentStatus: "Paid"`, `paymentMethod: "card"`.
@@ -110,6 +111,10 @@ Anything that needs a person is recorded, not just logged: a refund that keeps f
 ## Patch Notes
 
 Full history is in [CHANGELOG.md](CHANGELOG.md). Summary:
+
+### v1.5.0 (2026-09-24)
+_Integrated by Dan Leoncito._
+- **Added:** Delivery address on orders: checkout (COD) and payment-intent creation require and validate a `shippingAddress`, and it is saved on the order (also for orders created by the Stripe webhook). Deploy the storefront first.
 
 ### v1.4.0 (2026-09-24)
 _Integrated by Dan Leoncito._

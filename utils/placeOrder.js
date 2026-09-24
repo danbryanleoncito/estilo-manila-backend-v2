@@ -21,6 +21,7 @@ module.exports.placeOrderFromCart = async ({
   paymentStatus,
   paymentMethod,
   paymentIntentId,
+  shippingAddress,
 }) => {
   const overCap = cart.cartItems.filter((i) => i.quantity > MAX_QTY_PER_LINE);
   if (overCap.length > 0) {
@@ -65,6 +66,7 @@ module.exports.placeOrderFromCart = async ({
     totalPrice,
     paymentStatus,
     paymentMethod,
+    shippingAddress,
   };
   // Omit the field entirely for COD (see the note on Order.paymentIntentId).
   if (paymentIntentId) orderData.paymentIntentId = paymentIntentId;
@@ -151,6 +153,7 @@ module.exports.placeOrderFromSnapshot = async ({
     paymentStatus: "Paid",
     paymentMethod: "card",
     paymentIntentId,
+    shippingAddress: snapshot.shippingAddress,
   });
 
   // Disputes are written before the order so a crash can never leave a Disputed line whose

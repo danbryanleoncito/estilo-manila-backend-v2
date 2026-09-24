@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { addressSchemaDefinition } = require("../utils/address");
 
 const orderSchema = new mongoose.Schema({
   userId: {
@@ -68,6 +69,8 @@ const orderSchema = new mongoose.Schema({
     enum: ["card", "cod"],
     default: "cod",
   },
+  // Where to deliver. Absent on orders placed before addresses were stored.
+  shippingAddress: { type: new mongoose.Schema(addressSchemaDefinition, { _id: false }) },
 });
 
 module.exports = mongoose.model("Order", orderSchema);

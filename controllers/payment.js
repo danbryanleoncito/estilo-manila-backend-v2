@@ -1,4 +1,5 @@
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const { stripe } = require("../utils/stripeClient");
+const { parseShippingAddress } = require("../utils/address");
 const Cart = require("../models/cart");
 const Order = require("../models/order");
 const Product = require("../models/product");
@@ -15,6 +16,12 @@ const { serverError } = require("../utils/respond");
 module.exports.createPaymentIntent = async (req, res) => {
   try {
     const userId = req.user.id;
+
+    // Before anything is charged for: where is it going?
+    const parsed = parseShippingAddress(req.body && req.body.shippingAddress);
+    if (!parsed.ok) {
+      return res.status(400).send({ message: parsed.message, field: parsed.field });
+    }
 
     const cart = await Cart.findOne({ userId });
     if (!cart || cart.cartItems.length === 0) {
@@ -65,6 +72,7 @@ module.exports.createPaymentIntent = async (req, res) => {
         userId: String(userId),
         items,
         amount: totalPrice,
+        shippingAddress: parsed.address,
       });
     } catch (snapshotErr) {
       await stripe.paymentIntents.cancel(paymentIntent.id).catch(() => {});

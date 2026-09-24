@@ -4,7 +4,8 @@ const PaymentSnapshot = require("../models/paymentSnapshot");
 const Dispute = require("../models/dispute");
 const Incident = require("../models/incident");
 const { resolveDispute } = require("../utils/disputes");
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const { stripe } = require("../utils/stripeClient");
+const { parseShippingAddress } = require("../utils/address");
 const {
   placeOrderFromCart,
   placeOrderFromSnapshot,
@@ -88,6 +89,12 @@ module.exports.checkout = async (req, res) => {
     }
 
     // ---- Cash on Delivery: all-or-nothing, nothing has been charged. ----
+    // Checked before the cart is touched, so a mistyped address costs the customer nothing.
+    const parsed = parseShippingAddress(req.body && req.body.shippingAddress);
+    if (!parsed.ok) {
+      return res.status(400).send({ message: parsed.message, field: parsed.field });
+    }
+
     // Taking the cart out of the database is the atomic claim: two simultaneous requests
     // (a double click, a retry) cannot both get it, so only one order can be placed. It goes
     // back if the order does not happen.
@@ -103,6 +110,7 @@ module.exports.checkout = async (req, res) => {
         cart,
         paymentStatus: "COD",
         paymentMethod: "cod",
+        shippingAddress: parsed.address,
       });
     } catch (placeErr) {
       await restoreCart(cart);

@@ -5,16 +5,11 @@
 // cannot stop a late retry from refunding twice. Every refund therefore also carries our key in
 // its metadata, and we look for it before creating a new one.
 
-let client = null;
-const getClient = () => {
-  if (!client) client = require("stripe")(process.env.STRIPE_SECRET_KEY);
-  return client;
-};
+const stripeClient = require("./stripeClient");
+const getClient = stripeClient.getStripe;
 
 // Tests only: swap in a fake Stripe client.
-module.exports.useClient = (fake) => {
-  client = fake;
-};
+module.exports.useClient = stripeClient.useStripe;
 
 const findExisting = async (paymentIntentId, key) => {
   const list = await getClient().refunds.list({ payment_intent: paymentIntentId, limit: 100 });
