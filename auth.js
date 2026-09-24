@@ -48,17 +48,43 @@ module.exports.verifyAdmin = (req, res, next) => {
 };
 
 //[ERROR HANDLER]
+// Used both as a helper (`.catch((e) => errorHandler(e, req, res))`) and as the app's final
+// Express error middleware. Known client mistakes get a 4xx with a readable message; anything
+// else is logged in full and answered with a generic 500, so database and Stripe internals never
+// reach the browser.
 module.exports.errorHandler = (err, req, res, next) => {
-  console.error(err);
-  const statusCode = err.status || 500;
-  const errorMessage = err.message || "Internal Server Error";
-  res.status(statusCode).json({
-    error: {
-      message: errorMessage,
-      errorCode: err.code || "SERVER_ERROR",
-      details: err.details || null,
-    },
-  });
+  if (res.headersSent) return;
+
+  let status = 500;
+  let message = "Internal Server Error";
+  let errorCode = "SERVER_ERROR";
+
+  if (err && err.type === "entity.parse.failed") {
+    status = 400;
+    message = "Request body is not valid JSON";
+    errorCode = "INVALID_JSON";
+  } else if (err && err.name === "ValidationError") {
+    status = 400;
+    message = Object.values(err.errors || {})
+      .map((e) => e.message)
+      .join(", ") || "Invalid data";
+    errorCode = "VALIDATION_ERROR";
+  } else if (err && err.name === "CastError") {
+    status = 400;
+    message = "Invalid id or value";
+    errorCode = "INVALID_VALUE";
+  } else if (err && err.code === 11000) {
+    status = 409;
+    message = "That already exists";
+    errorCode = "DUPLICATE";
+  } else if (err && Number.isInteger(err.status) && err.status >= 400 && err.status < 500) {
+    status = err.status;
+    message = err.message || "Bad request";
+  } else {
+    console.error(err);
+  }
+
+  res.status(status).json({ error: { message, errorCode, details: null } });
 };
 
 // [VERIFY LOG IN]

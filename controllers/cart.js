@@ -4,6 +4,11 @@ const Product = require("../models/product");
 const mongoose = require("mongoose");
 const { recomputeCartTotal } = require("../utils/cartTotal");
 const { MAX_QTY_PER_LINE, maxPurchasable } = require("../utils/limits");
+const { serverError } = require("../utils/respond");
+
+// Totals in the cart screens skip lines whose product was deleted (checkout and payment still
+// refuse them), so one dead line cannot make every cart action fail.
+const totalOf = (cartItems) => recomputeCartTotal(cartItems, { skipMissing: true });
 
 module.exports.addToCart = async (req, res) => {
   try {
@@ -74,14 +79,7 @@ module.exports.addToCart = async (req, res) => {
         cart.cartItems.push({ productId, quantity: qty, subtotal });
       }
 
-      let totalPrice = 0;
-      for (let i = 0; i < cart.cartItems.length; i++) {
-        const item = cart.cartItems[i];
-        const product = await Product.findById(item.productId);
-        item.subtotal = product.price * item.quantity;
-        totalPrice += item.subtotal;
-      }
-      cart.totalPrice = totalPrice;
+      cart.totalPrice = await totalOf(cart.cartItems);
     } else {
       // If no cart exists, create a new one
       cart = new Cart({
@@ -98,7 +96,7 @@ module.exports.addToCart = async (req, res) => {
       cart,
     });
   } catch (error) {
-    res.status(500).send({ message: "Something went wrong", error: error.message });
+    serverError(res, "Could not add the item to your cart", error);
   }
 };
 
@@ -112,19 +110,8 @@ module.exports.getCart = async (req, res) => {
     }
     res.status(200).send(cart);
   } catch (error) {
-    res.status(500).send({ message: "Something went wrong", error: error.message });
+    serverError(res, "Could not load your cart", error);
   }
-};
-
-// Helper function to calculate the total price of the cart
-const calculateTotalPrice = (cartItems) => {
-  return cartItems.reduce((total, item) => {
-    if (isNaN(item.subtotal)) {
-      console.warn(`Invalid subtotal for item: ${item}`);
-      return total; // Skip this item if subtotal is NaN
-    }
-    return total + item.subtotal;
-  }, 0);
 };
 
 // Update Product Quantity in Cart
@@ -152,6 +139,10 @@ module.exports.updateCartQuantity = async (req, res) => {
     if (!cart) {
       return res.status(404).send({ message: "Cart not found" });
     }
+
+    // A line whose product was deleted comes back populated as null; it can never be bought
+    // again, so drop it here rather than let it fail the save ("productId is required").
+    cart.cartItems = cart.cartItems.filter((item) => item.productId);
 
     const itemIndex = cart.cartItems.findIndex(
       (item) => item.productId._id.toString() === productId
@@ -217,17 +208,7 @@ module.exports.updateCartQuantity = async (req, res) => {
 
     // Uses the shared helper: the old inline sum read `productId.price`, which is
     // undefined (NaN total) for a line just pushed with an unpopulated productId.
-    const totalPrice = await recomputeCartTotal(cart.cartItems);
-
-    if (isNaN(totalPrice)) {
-      console.error("Total price calculation resulted in NaN:", totalPrice);
-      return res.status(400).send({
-        message: "Invalid totalPrice calculation",
-        error: "totalPrice is NaN",
-      });
-    }
-
-    cart.totalPrice = totalPrice;
+    cart.totalPrice = await totalOf(cart.cartItems);
 
     const updatedCart = await cart.save();
     res.status(200).send({
@@ -235,8 +216,7 @@ module.exports.updateCartQuantity = async (req, res) => {
       cart: updatedCart,
     });
   } catch (error) {
-    console.error("Error updating cart:", error);
-    res.status(500).send({ message: "An error occurred", error: error.message });
+    serverError(res, "Could not update your cart", error);
   }
 };
 
@@ -246,35 +226,31 @@ exports.removeFromCart = async (req, res) => {
     const userId = req.user.id;
     const { productId } = req.params;
 
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).send({ message: "Invalid product id" });
+    }
+
     let cart = await Cart.findOne({ userId });
     if (!cart) {
       return res.status(404).send({ message: "Cart not found" });
     }
 
     const itemIndex = cart.cartItems.findIndex((p) => p.productId == productId);
-    if (itemIndex > -1) {
-      const item = cart.cartItems[itemIndex];
-      cart.totalPrice -= item.subtotal;
-
-      cart.cartItems.splice(itemIndex, 1);
-      await cart.save();
-      let totalPrice = 0;
-      for (let i = 0; i < cart.cartItems.length; i++) {
-        const item = cart.cartItems[i];
-        const product = await Product.findById(item.productId);
-        item.subtotal = product.price * item.quantity;
-        totalPrice += item.subtotal;
-      }
-      cart.totalPrice = totalPrice;
-      return res.status(200).send({
-        message: `Item removed from cart successfully`,
-        cart,
-      });
-    } else {
+    if (itemIndex === -1) {
       return res.status(404).send({ message: "Product not found in cart" });
     }
+
+    cart.cartItems.splice(itemIndex, 1);
+    // Recompute first, then save: the old code saved before recomputing, so the corrected
+    // total was never stored.
+    cart.totalPrice = await totalOf(cart.cartItems);
+    await cart.save();
+    return res.status(200).send({
+      message: `Item removed from cart successfully`,
+      cart,
+    });
   } catch (error) {
-    res.status(500).send({ message: error.message });
+    serverError(res, "Could not remove the item from your cart", error);
   }
 };
 
@@ -295,6 +271,6 @@ exports.clearCart = async (req, res) => {
 
     res.status(200).send({ message: "Cart cleared successfully", cart });
   } catch (error) {
-    res.status(500).send({ message: "Something went wrong", error: error.message });
+    serverError(res, "Could not clear your cart", error);
   }
 };

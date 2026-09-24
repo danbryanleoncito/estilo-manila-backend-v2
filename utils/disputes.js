@@ -1,7 +1,9 @@
 const Dispute = require("../models/dispute");
 const Order = require("../models/order");
 const Product = require("../models/product");
-const { refundAmount } = require("./refund");
+const refund = require("./refund");
+const incidents = require("./incidents");
+const { safeReconcile } = require("./reconcile");
 
 const STUCK_AFTER_MS = 10 * 60 * 1000;
 
@@ -10,7 +12,7 @@ const STUCK_AFTER_MS = 10 * 60 * 1000;
 const finishDispute = async (d) => {
   // 1. Money: partial refund for the units the customer no longer wants / cannot get.
   if (d.refundAmount > 0) {
-    await refundAmount(d.paymentIntentId, d.refundAmount, `dispute_${d._id}`);
+    await refund.refundAmount(d.paymentIntentId, d.refundAmount, `dispute_${d._id}`);
   }
 
   // 2. Stock: put back the held units that are not kept. The flag flips first so a crash can
@@ -71,6 +73,7 @@ const finishDispute = async (d) => {
     { _id: d._id },
     { $set: { status: "Resolved", resolvedAt: new Date() } }
   );
+  await incidents.resolve("dispute-stuck", d._id);
 };
 
 // Customer (or system) resolves an open dispute. `action` is "cancel" or "reduce".
@@ -127,7 +130,11 @@ module.exports.resolveDispute = async ({ id, userId, action, quantity, expired =
     await finishDispute(claimed);
   } catch (err) {
     // Leave it Resolving with the decision saved; the sweep retries idempotently.
-    console.error(`Dispute ${claimed._id} not fully finished, will retry:`, err.message);
+    await incidents.report(
+      "dispute-stuck",
+      claimed._id,
+      `Dispute ${claimed._id} not fully finished, will retry: ${err.message}`
+    );
     return {
       ok: false,
       code: 502,
@@ -153,8 +160,15 @@ module.exports.expireDisputes = async () => {
     try {
       await finishDispute(d);
     } catch (err) {
-      console.error(`Dispute ${d._id} still stuck:`, err.message);
+      await incidents.report("dispute-stuck", d._id, `Dispute ${d._id} still stuck: ${err.message}`);
     }
   }
-  return { expired: expired.length, retried: stuck.length };
+
+  // Refunds owed on orders (lines that were unavailable at order time) that never went through.
+  const owed = await Order.find({ pendingRefund: { $gt: 0 } }).limit(50);
+  for (const order of owed) {
+    await safeReconcile(order);
+  }
+
+  return { expired: expired.length, retried: stuck.length, refundsRetried: owed.length };
 };

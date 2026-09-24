@@ -1,7 +1,18 @@
 const Product = require("../models/product");
 
-const User = require("../models/user");
+const mongoose = require("mongoose");
 const { errorHandler } = require("../auth");
+const { serverError } = require("../utils/respond");
+
+const badId = (res) => res.status(400).send({ message: "Invalid product id" });
+
+// Returns the price as a number, undefined when not supplied, or null when invalid (a price
+// must be a positive number).
+const parsePrice = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
 
 // Returns the stock as a number, undefined when not supplied, or null when invalid.
 const parseStock = (value) => {
@@ -18,13 +29,18 @@ module.exports.addProduct = (req, res) => {
       .send({ message: "Stock must be a whole number of 0 or more" });
   }
 
+  const price = parsePrice(req.body.price);
+  if (price === undefined || price === null) {
+    return res.status(400).send({ message: "Price must be a number greater than 0" });
+  }
+
   // Creates a variable "newProduct" and instantiates a new "Product" object using the mongoose model
   // Uses the information from the request body to provide all the necessary information
 
   let newProduct = new Product({
     name: req.body.name,
     description: req.body.description,
-    price: req.body.price,
+    price,
     image: req.body.image,
     stock,
   });
@@ -89,6 +105,10 @@ module.exports.getAllActive = (req, res) => {
 };
 
 module.exports.getProduct = (req, res) => {
+  // A malformed id can never match a product, so it is a 404, not a server error.
+  if (!mongoose.isValidObjectId(req.params.productId)) {
+    return res.status(404).send({ message: "Product not found" });
+  }
   Product.findById(req.params.productId)
     .then((product) => {
       if (product) {
@@ -103,6 +123,11 @@ module.exports.getProduct = (req, res) => {
 };
 
 module.exports.updateProduct = (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.productId)) return badId(res);
+  const price = parsePrice(req.body.price);
+  if (price === null) {
+    return res.status(400).send({ message: "Price must be a number greater than 0" });
+  }
   const stock = parseStock(req.body.stock);
   if (stock === null) {
     return res
@@ -113,7 +138,7 @@ module.exports.updateProduct = (req, res) => {
   let updatedProduct = {
     name: req.body.name,
     description: req.body.description,
-    price: req.body.price,
+    price,
     image: req.body.image,
     stock,
   };
@@ -142,6 +167,7 @@ module.exports.updateProduct = (req, res) => {
 module.exports.archiveProduct = async (req, res) => {
   try {
     const { productId } = req.params;
+    if (!mongoose.isValidObjectId(productId)) return badId(res);
 
     const product = await Product.findByIdAndUpdate(
       productId,
@@ -157,13 +183,14 @@ module.exports.archiveProduct = async (req, res) => {
       product,
     });
   } catch (error) {
-    res.status(500).send({ message: "Server error", error: error.message });
+    serverError(res, "Could not update the product", error);
   }
 };
 
 module.exports.activateProduct = async (req, res) => {
   try {
     const { productId } = req.params;
+    if (!mongoose.isValidObjectId(productId)) return badId(res);
 
     const product = await Product.findByIdAndUpdate(
       productId,
@@ -179,7 +206,7 @@ module.exports.activateProduct = async (req, res) => {
       product,
     });
   } catch (error) {
-    res.status(500).send({ message: "Server error", error: error.message });
+    serverError(res, "Could not update the product", error);
   }
 };
 
@@ -189,6 +216,16 @@ module.exports.searchByName = (req, res) => {
   // Validate the input
   if (!name || typeof name !== "string") {
     return res.status(400).send({ message: "Invalid product name" });
+  }
+  // The term is used as a regular expression (the storefront escapes it first), so refuse
+  // anything absurdly long or that is not a valid pattern rather than fail (or stall) in the database.
+  if (name.length > 100) {
+    return res.status(400).send({ message: "Search text is too long" });
+  }
+  try {
+    new RegExp(name);
+  } catch (regexErr) {
+    return res.status(400).send({ message: "Search text is not valid" });
   }
 
   // Search for products with names containing the search term

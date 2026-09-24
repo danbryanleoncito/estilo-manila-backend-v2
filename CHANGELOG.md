@@ -2,6 +2,48 @@
 
 All notable changes to this backend are documented in this file.
 
+## [1.4.0] - 2026-09-24
+_Integrated by Dan Leoncito._
+
+### Added
+- Automated tests (`npm test`, Node's built-in runner) against an isolated in-memory MongoDB and a
+  fake Stripe, so they never touch a real database or account. They cover refunds, dispute crash
+  recovery, checkout, the webhook, and the API's validation and error handling.
+- Incidents: problems that need a person (a refund that keeps failing, a dispute stuck half way, a
+  payment that has no order, a webhook that keeps failing) are now stored in an `Incident`
+  collection and listed for admins at `GET /b4/order/incidents`, instead of only appearing in the
+  console. They close themselves when the problem is fixed.
+- Every PaymentIntent is tagged with the environment that created it (`render` or `local`).
+
+### Fixed
+- **Double refunds.** Stripe forgets an idempotency key after about 24 hours, but a refund that failed
+  was retried indefinitely, so a late retry could refund twice. Each refund now carries its key in
+  Stripe metadata and is looked up before a new one is made (checked against real Stripe test mode).
+- **A charged customer with no order went unnoticed.** A payment with no snapshot was ignored with
+  only a console line. If this environment created the payment it is now recorded as an incident (and
+  still never auto-refunded); payments from other environments are ignored as before.
+- **A failed refund made a successful checkout look failed.** The order was saved, then a Stripe call
+  could throw, so checkout answered 500 and the cart was never cleared. The cart is now cleared first,
+  a failed refund is recorded and retried by the 5-minute sweep, and a retry clears a cart that was
+  left behind (without touching items added since).
+- **Cash on Delivery double submit** could place two orders. The cart is now claimed atomically and
+  put back if the order does not happen (shortage or error).
+- `GET /b4/users/` was public and returned password hashes. It now needs an admin and never
+  includes passwords.
+- Registration accepted duplicate emails (and any capitalisation), crashed on missing fields, and
+  login never answered when the email had no `@`. Emails are now compared case-insensitively,
+  inputs are validated, and every path answers. Changing a password now applies the same rules as
+  registering.
+- A deleted product left in a cart crashed add-to-cart and remove-from-cart, and remove-from-cart
+  stored a stale total. Totals now skip missing products and are recomputed before saving; updating a
+  quantity drops a dead line.
+- Errors: a bad JSON body or unknown route returned an HTML page; 500 responses included database and
+  Stripe internals; malformed product ids and Stripe "unknown payment"/"amount too small" errors were
+  500s. All now answer in JSON with a plain message (internals stay in the log), and a database
+  connection failure at start-up stops the server instead of leaving it half alive.
+- Product create/update now validate the price (a positive number) and search rejects an invalid or
+  oversized pattern instead of failing.
+
 ## [1.3.1] - 2026-09-24
 _Integrated by Dan Leoncito._
 
