@@ -79,6 +79,7 @@ All routes are prefixed with `/b4`.
   - Without it, the order is a Cash on Delivery order: `paymentStatus: "COD"`, `paymentMethod: "cod"`.
 - The webhook is the source of truth: on `payment_intent.succeeded` it creates the order even if the browser never called checkout. Checkout and the webhook are idempotent against each other (a unique index on `Order.paymentIntentId`), so a payment can never produce two orders.
 - The webhook route is registered with a raw body parser **before** `express.json()` in `index.js`. Signature verification breaks if that order changes.
+- A Stripe test account sends every event to **every** registered endpoint and `stripe listen`, so a local server and the deployed one both receive each payment. The webhook only acts on payments it created itself (it has a snapshot for them) and ignores the rest, so the environments never refund each other's payments.
 - Use Stripe's test cards, e.g. `4242 4242 4242 4242` (success), `4000 0027 6000 3184` (3D Secure), `4000 0000 0000 0002` (declined), with any future expiry and any CVC. No real money is ever charged.
 
 ## Stock
@@ -99,6 +100,11 @@ All routes are prefixed with `/b4`.
 ## Patch Notes
 
 Full history is in [CHANGELOG.md](CHANGELOG.md). Summary:
+
+### v1.3.1 (2026-09-24)
+_Integrated by Dan Leoncito._
+- **Added:** Order lines store the product name at purchase time.
+- **Fixed:** The webhook no longer refunds payments it has no snapshot for (a shared Stripe test account feeds every environment); archived products can no longer be added to a cart, bought, or found in search; a malformed product id in the cart endpoints returns 400 instead of risking a crash.
 
 ### v1.3.0 (2026-09-24)
 _Integrated by Dan Leoncito._

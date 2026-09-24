@@ -108,10 +108,12 @@ module.exports.handleWebhook = async (req, res) => {
 
       const snapshot = await PaymentSnapshot.findOne({ paymentIntentId });
       if (!snapshot || snapshot.userId !== String(userId)) {
-        console.error(
-          `No payment snapshot for ${paymentIntentId}; refunding it rather than guessing what was bought.`
+        // Not ours to act on. One Stripe (test) account can feed several backends (e.g. a
+        // local dev server and the deployed one all get every event), so a payment with no
+        // snapshot here most likely belongs to another environment. Never refund it.
+        console.warn(
+          `Ignoring ${paymentIntentId}: no matching payment snapshot in this environment.`
         );
-        await refundPayment(paymentIntentId);
         return res.status(200).json({ received: true });
       }
       if (Math.round(snapshot.amount * 100) !== intent.amount) {

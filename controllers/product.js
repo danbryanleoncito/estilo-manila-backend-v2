@@ -192,7 +192,7 @@ module.exports.searchByName = (req, res) => {
   }
 
   // Search for products with names containing the search term
-  Product.find({ name: { $regex: name, $options: "i" } })
+  Product.find({ name: { $regex: name, $options: "i" }, isActive: true })
     .then((products) => {
       if (products.length > 0) {
         return res.status(200).send(products);
@@ -219,7 +219,7 @@ module.exports.searchByPrice = (req, res) => {
     return res.status(400).send({ message: "Invalid price values" });
   }
 
-  Product.find({ price: { $gte: min, $lte: max } })
+  Product.find({ price: { $gte: min, $lte: max }, isActive: true })
     .then((products) => {
       if (products.length > 0) {
         return res.status(200).send(products);

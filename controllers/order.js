@@ -41,7 +41,8 @@ module.exports.checkout = async (req, res) => {
         // The webhook refunds payments it cannot match to a snapshot.
         return res.status(409).send({
           message:
-            "We could not match this payment to your cart. It will be refunded automatically; please try checking out again.",
+            "We could not match this payment to your cart. Please contact support and quote your payment reference: " +
+            paymentIntentId,
         });
       }
 

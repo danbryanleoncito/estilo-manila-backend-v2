@@ -2,6 +2,27 @@
 
 All notable changes to this backend are documented in this file.
 
+## [1.3.1] - 2026-09-24
+_Integrated by Dan Leoncito._
+
+### Added
+- Order lines now store the product `name` at purchase time, so order screens can show real
+  names (and stay correct after a rename or deletion) instead of raw product ids.
+
+### Fixed
+- The Stripe webhook refunded any successful payment it had no snapshot for. One Stripe (test)
+  account can feed several backends (a local dev server and the deployed one each receive every
+  event), so each environment was refunding the other's payments. It now ignores payments it has
+  no matching snapshot for; only a payment it created itself, with a mismatched amount, is refunded.
+- Archived (inactive) products could be added to a cart, appeared in search, and could be bought
+  with Cash on Delivery. Add/update-cart, checkout and payment-intent creation now treat them as
+  unavailable (a customer may still reduce or remove an archived line), and both search endpoints
+  only return active products.
+- The cart controller's error paths sent a second response after `errorHandler` had already
+  responded, which throws inside an async handler (an unhandled rejection that can crash Node) —
+  for example on a malformed `productId`. They now send one plain 500, and add/update-cart
+  reject a malformed `productId` with 400.
+
 ## [1.3.0] - 2026-09-24
 _Integrated by Dan Leoncito._
 
