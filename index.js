@@ -14,6 +14,8 @@ const orderRoutes = require("./routes/order");
 const paymentRoutes = require("./routes/payment");
 const paymentController = require("./controllers/payment");
 const { expireDisputes } = require("./utils/disputes");
+const { errorHandler } = require("./auth");
+const incidents = require("./utils/incidents");
 
 const app = express();
 
@@ -39,10 +41,23 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-mongoose.connect(process.env.MONGO_STRING);
-mongoose.connection.once("open", () =>
-  console.log("Now connected to MongoDB.")
-);
+// Tests (NODE_ENV=test) connect to their own in-memory database instead.
+if (process.env.NODE_ENV !== "test") {
+  mongoose.connect(process.env.MONGO_STRING).catch((err) => {
+    // Without a database nothing works: say so and stop, so the host restarts us, instead of
+    // serving errors forever.
+    console.error("Could not connect to MongoDB:", err.message);
+    process.exit(1);
+  });
+  mongoose.connection.once("open", () =>
+    console.log("Now connected to MongoDB.")
+  );
+}
+
+// A promise nobody caught must never take the server down silently; it is logged.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});
 
 // [ROUTERS]
 app.use("/b4/users", userRoutes);
@@ -59,6 +74,13 @@ app.use("/b4/order", orderRoutes);
 //[SECTION] Payment routes
 app.use("/b4/payment", paymentRoutes);
 
+// Anything that matched no route, and anything a route threw, answers in JSON like the rest of
+// the API (the Express default is an HTML page, with a stack trace outside production).
+app.use((req, res) => {
+  res.status(404).json({ message: "Route not found" });
+});
+app.use(errorHandler);
+
 // https.createServer(sslOptions, app).listen(443, () => {
 //   console.log("HTTPS Server running on port 443");
 // });
@@ -74,9 +96,10 @@ if (require.main === module) {
   const sweepDisputes = () =>
     expireDisputes()
       .then((r) => {
-        if (r.expired || r.retried) console.log("Dispute sweep:", r);
+        if (r.expired || r.retried || r.refundsRetried) console.log("Dispute sweep:", r);
+        return incidents.resolve("sweep-failed", "dispute-sweep");
       })
-      .catch((err) => console.error("Dispute sweep failed:", err.message));
+      .catch((err) => incidents.report("sweep-failed", "dispute-sweep", err.message));
   sweepDisputes();
   setInterval(sweepDisputes, 5 * 60 * 1000);
 }

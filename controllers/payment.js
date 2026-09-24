@@ -5,8 +5,12 @@ const Product = require("../models/product");
 const PaymentSnapshot = require("../models/paymentSnapshot");
 const { recomputeCartTotal } = require("../utils/cartTotal");
 const { findShortages } = require("../utils/stock");
-const { placeOrderFromSnapshot, reconcileOrder } = require("../utils/placeOrder");
-const { refundPayment } = require("../utils/refund");
+const { placeOrderFromSnapshot } = require("../utils/placeOrder");
+const { safeReconcile } = require("../utils/reconcile");
+const refund = require("../utils/refund");
+const incidents = require("../utils/incidents");
+const { ENV_TAG } = require("../utils/envTag");
+const { serverError } = require("../utils/respond");
 
 module.exports.createPaymentIntent = async (req, res) => {
   try {
@@ -51,7 +55,7 @@ module.exports.createPaymentIntent = async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(totalPrice * 100),
       currency: "php",
-      metadata: { userId: String(userId) },
+      metadata: { userId: String(userId), env: ENV_TAG },
       payment_method_types: ["card"],
     });
 
@@ -74,7 +78,13 @@ module.exports.createPaymentIntent = async (req, res) => {
       totalPrice,
     });
   } catch (error) {
-    res.status(500).send({ message: "Failed to create payment intent", error: error.message });
+    if (error && error.code === "amount_too_small") {
+      return res.status(400).send({
+        message:
+          "Your total is below the minimum amount for a card payment. Add more items or pay with cash on delivery.",
+      });
+    }
+    serverError(res, "Could not start your card payment", error);
   }
 };
 
@@ -102,25 +112,38 @@ module.exports.handleWebhook = async (req, res) => {
       const existing = await Order.findOne({ paymentIntentId });
       if (existing) {
         // Already handled (e.g. by checkout); finish any refund that was still owed.
-        await reconcileOrder(existing);
+        await safeReconcile(existing);
         return res.status(200).json({ received: true });
       }
 
       const snapshot = await PaymentSnapshot.findOne({ paymentIntentId });
       if (!snapshot || snapshot.userId !== String(userId)) {
-        // Not ours to act on. One Stripe (test) account can feed several backends (e.g. a
-        // local dev server and the deployed one all get every event), so a payment with no
-        // snapshot here most likely belongs to another environment. Never refund it.
-        console.warn(
-          `Ignoring ${paymentIntentId}: no matching payment snapshot in this environment.`
-        );
+        // One Stripe (test) account can feed several backends (a local dev server and the
+        // deployed one all get every event), and refunding a payment that belongs to another
+        // environment is wrong, so we never refund from here. Whether it is a problem depends
+        // on who created the payment (see utils/envTag.js).
+        if (intent.metadata.env === ENV_TAG) {
+          // Ours, yet we have nothing to build an order from: a customer has been charged with
+          // no order. Needs a person, so it is recorded where the admin can see it.
+          await incidents.report(
+            "payment-no-snapshot",
+            paymentIntentId,
+            `Payment ${paymentIntentId} (${intent.amount / 100} ${intent.currency}) for user ${userId} succeeded but this environment has no snapshot to build an order from. The customer may have been charged without an order.`
+          );
+        } else {
+          console.warn(
+            `Ignoring ${paymentIntentId}: created by "${intent.metadata.env || "unknown"}", not this environment ("${ENV_TAG}").`
+          );
+        }
         return res.status(200).json({ received: true });
       }
       if (Math.round(snapshot.amount * 100) !== intent.amount) {
-        console.error(
-          `Snapshot amount ${snapshot.amount} does not match charged ${intent.amount} for ${paymentIntentId}; refunding.`
+        await incidents.report(
+          "amount-mismatch",
+          paymentIntentId,
+          `Snapshot amount ${snapshot.amount} does not match charged ${intent.amount / 100} for ${paymentIntentId}; the payment was refunded.`
         );
-        await refundPayment(paymentIntentId);
+        await refund.refundPayment(paymentIntentId);
         return res.status(200).json({ received: true });
       }
 
@@ -153,9 +176,20 @@ module.exports.handleWebhook = async (req, res) => {
       );
     }
 
+    if (event.type === "payment_intent.succeeded") {
+      await incidents.resolve("webhook-error", event.data.object.id);
+    }
     return res.status(200).json({ received: true });
   } catch (error) {
-    console.error("Webhook handler error:", error);
-    return res.status(500).json({ message: "Webhook handler failure", error: error.message });
+    // A 500 makes Stripe retry the event later, which is what we want; keep a record so a
+    // payment that keeps failing to process does not go unnoticed.
+    if (event.type === "payment_intent.succeeded") {
+      await incidents.report(
+        "webhook-error",
+        event.data.object.id,
+        `Could not process payment_intent.succeeded: ${error.message}`
+      );
+    }
+    return res.status(500).json({ message: "Webhook handler failure" });
   }
 };

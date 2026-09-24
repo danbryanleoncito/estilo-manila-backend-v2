@@ -16,4 +16,7 @@ router.get("/disputes", verify, orderController.getMyDisputes);
 router.get("/disputes/all", verify, verifyAdmin, orderController.getAllDisputes);
 router.post("/disputes/:id/resolve", verify, orderController.resolveDisputeById);
 
+// Problems that need a person (failed refunds, stuck disputes, payments with no order).
+router.get("/incidents", verify, verifyAdmin, orderController.getIncidents);
+
 module.exports = router;

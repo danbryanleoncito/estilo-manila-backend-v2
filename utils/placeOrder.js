@@ -4,24 +4,13 @@ const Product = require("../models/product");
 const Dispute = require("../models/dispute");
 const { recomputeCartTotal } = require("./cartTotal");
 const { reserveStock, releaseStock, reserveUpTo } = require("./stock");
-const { refundPayment, refundAmount } = require("./refund");
+const refund = require("./refund");
+const { findShortages: findAllShortages } = require("./stock");
+const { reconcileOrder, safeReconcile } = require("./reconcile");
 const { MAX_QTY_PER_LINE } = require("./limits");
 
 const DISPUTE_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Retry a refund that was owed when the order was created but did not go through
-// (idempotent: same Stripe idempotency key, so it can never refund twice).
-const reconcileOrder = async (order) => {
-  if (order && order.pendingRefund > 0) {
-    await refundAmount(
-      order.paymentIntentId,
-      order.pendingRefund,
-      `refund_${order.paymentIntentId}_instant`
-    );
-    await Order.updateOne({ _id: order._id }, { $set: { pendingRefund: 0 } });
-  }
-  return order;
-};
 module.exports.reconcileOrder = reconcileOrder;
 
 // COD / all-or-nothing: every line must be fully in stock or nothing is placed. Shared
@@ -44,6 +33,10 @@ module.exports.placeOrderFromCart = async ({
       })),
     };
   }
+
+  // A missing/archived product is a shortage (409), not an exception from the price lookup.
+  const unavailable = await findAllShortages(cart.cartItems);
+  if (unavailable.length > 0) return { ok: false, shortages: unavailable };
 
   const totalPrice = await recomputeCartTotal(cart.cartItems);
 
@@ -112,7 +105,7 @@ module.exports.placeOrderFromSnapshot = async ({
   }
 
   if (taken.length === 0) {
-    await refundPayment(paymentIntentId);
+    await refund.refundPayment(paymentIntentId);
     return {
       ok: false,
       shortages: lines.map(({ item }) => ({
@@ -189,14 +182,28 @@ module.exports.placeOrderFromSnapshot = async ({
     if (err.code === 11000) {
       const existing = await Order.findOne({ paymentIntentId });
       if (existing) {
-        await reconcileOrder(existing);
+        await safeReconcile(existing);
         return { ok: true, order: existing, alreadyPlaced: true };
       }
     }
     throw err;
   }
 
-  await reconcileOrder(order);
+  // The order exists and the customer has paid, so nothing below may turn this into an error:
+  // clear the cart first, and a refund that fails is recorded and retried by the sweep.
   await Cart.findOneAndDelete({ userId });
+  await safeReconcile(order);
   return { ok: true, order, disputesOpened: disputes.length };
+};
+
+// Retry path: the order was saved but the process died before the cart was cleared. Empty the
+// cart only if everything in it was part of that order, so items the customer has added since
+// are never thrown away.
+module.exports.clearCartIfPurchased = async (userId, order) => {
+  const cart = await Cart.findOne({ userId });
+  if (!cart || cart.cartItems.length === 0) return;
+  const ordered = new Set(order.productsOrdered.map((l) => String(l.productId)));
+  if (cart.cartItems.every((i) => ordered.has(String(i.productId)))) {
+    await Cart.deleteOne({ _id: cart._id });
+  }
 };

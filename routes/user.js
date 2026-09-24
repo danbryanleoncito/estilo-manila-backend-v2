@@ -10,7 +10,7 @@ router.post("/register", userController.register);
 router.post("/login", userController.login);
 router.get("/details", verify, userController.details);
 // router.patch("/update-password", verify, userController.updatePassword);
-router.get("/", userController.getAllUsers); //For testing. DELETE WHEN DONE
+router.get("/", verify, verifyAdmin, userController.getAllUsers);
 
 // [SECTION] Route for updating user password
 router.patch("/update-password", verify, userController.updatePassword);
