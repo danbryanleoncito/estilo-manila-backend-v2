@@ -12,7 +12,7 @@ const { checkout } = require("../controllers/order");
 const { placeOrderFromSnapshot } = require("../utils/placeOrder");
 
 const userId = new mongoose.Types.ObjectId();
-const req = () => ({ user: { id: String(userId) }, body: {} });
+const req = () => ({ user: { id: String(userId) }, body: { shippingAddress: helpers.validAddress() } });
 let stripe;
 
 const makeProduct = (over = {}) =>

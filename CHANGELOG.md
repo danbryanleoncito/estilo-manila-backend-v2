@@ -2,6 +2,25 @@
 
 All notable changes to this backend are documented in this file.
 
+## [1.5.0] - 2026-09-24
+_Integrated by Dan Leoncito._
+
+### Added
+- **Delivery address on orders.** `POST /order/checkout` (Cash on Delivery) and
+  `POST /payment/create-payment-intent` (card) now require a `shippingAddress`
+  (`fullName, phone, addressLine1, addressLine2?, city, province, postalCode, country`), validated and
+  normalised (Philippine mobile number, 4-digit postal code, Philippines only) and stored on the order as
+  `shippingAddress`. A missing or invalid address is a 400 that names the field (`{ message, field }`).
+  For COD it is checked before the cart is touched; for card it is checked before anything is charged.
+- For card orders the address is frozen in the payment snapshot when the payment is created, so an order
+  created by the Stripe webhook alone (the browser never called checkout) still has it.
+- `utils/stripeClient.js`: one lazily created Stripe client that tests can replace.
+
+### Changed
+- Orders placed before this release have no `shippingAddress`; everything that reads orders tolerates that.
+- **Deploy note:** the storefront must send the address, so deploy the frontend first. An older
+  storefront that does not send it gets a 400 ("A delivery address is required") at checkout.
+
 ## [1.4.0] - 2026-09-24
 _Integrated by Dan Leoncito._
 

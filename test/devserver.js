@@ -48,6 +48,7 @@ async function seed(models, stripe) {
     Order.create({
       userId: String(disputer._id), productsOrdered: lines, totalPrice: total, paymentStatus: "Paid",
       paymentMethod: "card", paymentIntentId: pi, orderedOn: when || new Date(),
+      shippingAddress: { fullName: "Dispute Tester", phone: "09171234567", addressLine1: "12 Rizal Street", addressLine2: "Unit 4B", city: "Makati", province: "Metro Manila", postalCode: "1200", country: "Philippines" },
     });
   const dispute = (o, lineIdx, p, unit, req, held, status, pi, extra = {}) =>
     Dispute.create({

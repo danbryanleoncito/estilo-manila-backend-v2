@@ -38,8 +38,24 @@ module.exports.clearDb = async () => {
 // real Stripe does once a key is more than ~24 hours old, so a test can prove we do not rely on them.
 module.exports.fakeStripe = () => {
   const refunds = [];
+  const intents = [];
   let failures = 0;
   return {
+    // Signature checking is local maths, not a network call, so the real one is used.
+    webhooks: require("stripe")("sk_test_dummy").webhooks,
+    paymentIntents: {
+      create: async (params) => {
+        const intent = { id: `pi_fake_${intents.length + 1}`, client_secret: "cs_fake", ...params };
+        intents.push(intent);
+        return intent;
+      },
+      cancel: async (id) => {
+        const i = intents.findIndex((x) => x.id === id);
+        if (i >= 0) intents.splice(i, 1);
+        return { id, status: "canceled" };
+      },
+    },
+    intents,
     refunds: {
       list: async ({ payment_intent }) => ({
         data: refunds.filter((r) => r.payment_intent === payment_intent),
@@ -84,5 +100,18 @@ module.exports.fakeRes = () => {
   };
   return res;
 };
+
+// A valid delivery address, as the storefront sends it.
+module.exports.validAddress = (over = {}) => ({
+  fullName: "Ada Lovelace",
+  phone: "0917 123 4567",
+  addressLine1: "12 Rizal Street",
+  addressLine2: "Unit 4B",
+  city: "Makati",
+  province: "Metro Manila",
+  postalCode: "1200",
+  country: "Philippines",
+  ...over,
+});
 
 module.exports.mongoose = mongoose;

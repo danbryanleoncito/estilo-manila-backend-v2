@@ -244,7 +244,7 @@ it("a checkout server error does not leak internals", async () => {
   };
   let r;
   try {
-    r = await call("POST", "/order/checkout", { token, body: {} });
+    r = await call("POST", "/order/checkout", { token, body: { shippingAddress: helpers.validAddress() } });
   } finally {
     Cart.findOneAndDelete = original;
   }
