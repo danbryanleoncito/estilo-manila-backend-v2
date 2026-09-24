@@ -101,6 +101,8 @@ All routes are prefixed with `/b4`.
 
 `npm test` runs the suite in `test/` with Node's built-in runner. It starts its own in-memory MongoDB (the first run downloads a MongoDB binary, then it is cached) and replaces Stripe with a fake, and it forces throwaway settings before the app loads, so it cannot reach your `MONGO_STRING` database or your Stripe account.
 
+To try the storefront without touching any real data, run `node test/devserver.js`: it serves the real API on port 3005 from an in-memory database with sample products, users (password `Secret123!`: `admin@example.com`, `shopper@example.com`, `dispute@example.com` with open disputes) and a fake Stripe, then start the frontend with `REACT_APP_API_BASE_URL=http://localhost:3005/b4` on port 3000. `/__dev/down?on=1` makes it behave as if offline and `/__dev/dump` shows its state. Everything is lost when it stops.
+
 ## Incidents
 
 Anything that needs a person is recorded, not just logged: a refund that keeps failing, a dispute stuck half way, a card payment that succeeded here with no order to show for it (`payment-no-snapshot`), a webhook that keeps failing. Admins read them at `GET /b4/order/incidents`; they close themselves once the problem is fixed. A payment created by another environment (each PaymentIntent is tagged `render` or `local`) is ignored, never refunded and never an incident.
